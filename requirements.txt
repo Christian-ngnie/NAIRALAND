@@ -11,4 +11,4 @@ nltk==3.8.1
 tqdm==4.66.2
 python-dateutil==2.9.0.post0
 setuptools==69.5.1
-wordcloud @ git+https://github.com/amueller/word_cloud.git@master
+wordcloud @ git+https://github.com/amueller/word_cloud.git@main
