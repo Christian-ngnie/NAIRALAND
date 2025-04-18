@@ -11,4 +11,4 @@ nltk==3.8.1
 tqdm==4.66.2
 python-dateutil==2.9.0.post0
 setuptools==69.5.1
-wordcloud @ https://github.com/amueller/word_cloud/releases/download/v1.9.3/wordcloud-1.9.3.tar.gz
+wordcloud @ git+https://github.com/amueller/word_cloud.git@master
