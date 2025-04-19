@@ -706,326 +706,327 @@ class CoordinationAnalyzer:
         return reply_counts
     
     def calculate_response_times(self, reply_network):
-    """Calculate how quickly users respond to each other"""
-    response_times = {}
-    
-    for user1, user_data1 in self.user_data.items():
-        response_times[user1] = {}
+        """Calculate how quickly users respond to each other"""
+        response_times = {}
         
-        # Sort user1's posts by date+time
-        sorted_posts1 = []
-        for post in user_data1.get('posts', []):
-            try:
-                if post.get('post_date') and post.get('post_time'):
-                    date_str = post['post_date']
-                    time_str = post['post_time']
-                    
-                    # Try different date formats
-                    date_formats = ['%B %d, %Y', '%d-%m-%Y', '%Y-%m-%d']
-                    parsed_date = None
-                    
-                    for fmt in date_formats:
-                        try:
-                            parsed_date = datetime.strptime(date_str, fmt)
-                            break
-                        except:
-                            continue
-                    
-                    if parsed_date and time_str:
-                        # Extract time components
-                        time_match = re.search(r'(\d{1,2}):(\d{2}) ([AP]M)', time_str)
-                        if time_match:
-                            hour = int(time_match.group(1))
-                            minute = int(time_match.group(2))
-                            am_pm = time_match.group(3)
-                            
-                            if am_pm.upper() == 'PM' and hour < 12:
-                                hour += 12
-                            elif am_pm.upper() == 'AM' and hour == 12:
-                                hour = 0
-                            
-                            # Create full datetime
-                            post_datetime = parsed_date.replace(hour=hour, minute=minute)
-                            
-                            sorted_posts1.append({
-                                'datetime': post_datetime,
-                                'is_reply': post.get('is_reply', False),
-                                'quoted_user': post.get('quoted_user'),
-                                'post_id': post.get('post_id')
-                            })
-            except:
-                pass
-        
-        # Sort by datetime
-        sorted_posts1.sort(key=lambda x: x['datetime'])
-        
-        # For each user that user1 replies to
-        for user2 in reply_network.get(user1, {}):
-            if user2 != user1:
-                response_delays = []
-                
-                # Get user2's posts
-                user_data2 = self.user_data.get(user2, {})
-                sorted_posts2 = []
-                
-                for post in user_data2.get('posts', []):
-                    try:
-                        if post.get('post_date') and post.get('post_time'):
-                            date_str = post['post_date']
-                            time_str = post['post_time']
-                            
-                            # Try different date formats
-                            date_formats = ['%B %d, %Y', '%d-%m-%Y', '%Y-%m-%d']
-                            parsed_date = None
-                            
-                            for fmt in date_formats:
-                                try:
-                                    parsed_date = datetime.strptime(date_str, fmt)
-                                    break
-                                except:
-                                    continue
-                            
-                            if parsed_date and time_str:
-                                # Extract time components
-                                time_match = re.search(r'(\d{1,2}):(\d{2}) ([AP]M)', time_str)
-                                if time_match:
-                                    hour = int(time_match.group(1))
-                                    minute = int(time_match.group(2))
-                                    am_pm = time_match.group(3)
-                                    
-                                    if am_pm.upper() == 'PM' and hour < 12:
-                                        hour += 12
-                                    elif am_pm.upper() == 'AM' and hour == 12:
-                                        hour = 0
-                                    
-                                    # Create full datetime
-                                    post_datetime = parsed_date.replace(hour=hour, minute=minute)
-                                    
-                                    sorted_posts2.append({
-                                        'datetime': post_datetime,
-                                        'post_id': post.get('post_id')
-                                    })
-                    except:
-                        pass
-                
-                # Sort user2's posts by datetime
-                sorted_posts2.sort(key=lambda x: x['datetime'])
-                
-                # For each of user1's posts that is a reply to user2
-                for post1 in sorted_posts1:
-                    if post1['is_reply'] and post1['quoted_user'] == user2:
-                        # Find the most recent post from user2 before user1's reply
-                        prev_post = None
-                        for post2 in sorted_posts2:
-                            if post2['datetime'] < post1['datetime']:
-                                prev_post = post2
-                            else:
-                                break
-                        
-                        if prev_post:
-                            # Calculate time difference in minutes
-                            time_diff = (post1['datetime'] - prev_post['datetime']).total_seconds() / 60
-                            response_delays.append(time_diff)
-                
-                # Calculate average response time if we have any valid measurements
-                if response_delays:
-                    response_times[user1][user2] = {
-                        'mean': np.mean(response_delays),
-                        'median': np.median(response_delays),
-                        'min': min(response_delays),
-                        'max': max(response_delays),
-                        'count': len(response_delays)
-                    }
-                else:
-                    response_times[user1][user2] = {
-                        'mean': None,
-                        'median': None,
-                        'min': None,
-                        'max': None,
-                        'count': 0
-                    }
-    
-    return response_times
-    def calculate_registration_proximity(self):
-    """Calculate how close users registered to each other"""
-    reg_proximity = {}
-    
-    # Extract registration dates for each user
-    reg_dates = {}
-    for username, user_data in self.user_data.items():
-        reg_date = user_data.get('user_info', {}).get('registration_date')
-        if reg_date:
-            # Try to parse the registration date
-            date_formats = ['%B %d, %Y', '%d-%m-%Y', '%Y-%m-%d']
-            parsed_date = None
+        for user1, user_data1 in self.user_data.items():
+            response_times[user1] = {}
             
-            for fmt in date_formats:
+            # Sort user1's posts by date+time
+            sorted_posts1 = []
+            for post in user_data1.get('posts', []):
                 try:
-                    parsed_date = datetime.strptime(reg_date, fmt)
-                    break
+                    if post.get('post_date') and post.get('post_time'):
+                        date_str = post['post_date']
+                        time_str = post['post_time']
+                        
+                        # Try different date formats
+                        date_formats = ['%B %d, %Y', '%d-%m-%Y', '%Y-%m-%d']
+                        parsed_date = None
+                        
+                        for fmt in date_formats:
+                            try:
+                                parsed_date = datetime.strptime(date_str, fmt)
+                                break
+                            except:
+                                continue
+                        
+                        if parsed_date and time_str:
+                            # Extract time components
+                            time_match = re.search(r'(\d{1,2}):(\d{2}) ([AP]M)', time_str)
+                            if time_match:
+                                hour = int(time_match.group(1))
+                                minute = int(time_match.group(2))
+                                am_pm = time_match.group(3)
+                                
+                                if am_pm.upper() == 'PM' and hour < 12:
+                                    hour += 12
+                                elif am_pm.upper() == 'AM' and hour == 12:
+                                    hour = 0
+                                
+                                # Create full datetime
+                                post_datetime = parsed_date.replace(hour=hour, minute=minute)
+                                
+                                sorted_posts1.append({
+                                    'datetime': post_datetime,
+                                    'is_reply': post.get('is_reply', False),
+                                    'quoted_user': post.get('quoted_user'),
+                                    'post_id': post.get('post_id')
+                                })
                 except:
-                    continue
+                    pass
             
-            if parsed_date:
-                reg_dates[username] = parsed_date
-    
-    # Calculate proximity for each pair of users
-    for user1, date1 in reg_dates.items():
-        reg_proximity[user1] = {}
+            # Sort by datetime
+            sorted_posts1.sort(key=lambda x: x['datetime'])
+            
+            # For each user that user1 replies to
+            for user2 in reply_network.get(user1, {}):
+                if user2 != user1:
+                    response_delays = []
+                    
+                    # Get user2's posts
+                    user_data2 = self.user_data.get(user2, {})
+                    sorted_posts2 = []
+                    
+                    for post in user_data2.get('posts', []):
+                        try:
+                            if post.get('post_date') and post.get('post_time'):
+                                date_str = post['post_date']
+                                time_str = post['post_time']
+                                
+                                # Try different date formats
+                                date_formats = ['%B %d, %Y', '%d-%m-%Y', '%Y-%m-%d']
+                                parsed_date = None
+                                
+                                for fmt in date_formats:
+                                    try:
+                                        parsed_date = datetime.strptime(date_str, fmt)
+                                        break
+                                    except:
+                                        continue
+                                
+                                if parsed_date and time_str:
+                                    # Extract time components
+                                    time_match = re.search(r'(\d{1,2}):(\d{2}) ([AP]M)', time_str)
+                                    if time_match:
+                                        hour = int(time_match.group(1))
+                                        minute = int(time_match.group(2))
+                                        am_pm = time_match.group(3)
+                                        
+                                        if am_pm.upper() == 'PM' and hour < 12:
+                                            hour += 12
+                                        elif am_pm.upper() == 'AM' and hour == 12:
+                                            hour = 0
+                                        
+                                        # Create full datetime
+                                        post_datetime = parsed_date.replace(hour=hour, minute=minute)
+                                        
+                                        sorted_posts2.append({
+                                            'datetime': post_datetime,
+                                            'post_id': post.get('post_id')
+                                        })
+                        except:
+                            pass
+                    
+                    # Sort user2's posts by datetime
+                    sorted_posts2.sort(key=lambda x: x['datetime'])
+                    
+                    # For each of user1's posts that is a reply to user2
+                    for post1 in sorted_posts1:
+                        if post1['is_reply'] and post1['quoted_user'] == user2:
+                            # Find the most recent post from user2 before user1's reply
+                            prev_post = None
+                            for post2 in sorted_posts2:
+                                if post2['datetime'] < post1['datetime']:
+                                    prev_post = post2
+                                else:
+                                    break
+                            
+                            if prev_post:
+                                # Calculate time difference in minutes
+                                time_diff = (post1['datetime'] - prev_post['datetime']).total_seconds() / 60
+                                response_delays.append(time_diff)
+                    
+                    # Calculate average response time if we have any valid measurements
+                    if response_delays:
+                        response_times[user1][user2] = {
+                            'mean': np.mean(response_delays),
+                            'median': np.median(response_delays),
+                            'min': min(response_delays),
+                            'max': max(response_delays),
+                            'count': len(response_delays)
+                        }
+                    else:
+                        response_times[user1][user2] = {
+                            'mean': None,
+                            'median': None,
+                            'min': None,
+                            'max': None,
+                            'count': 0
+                        }
         
-        for user2, date2 in reg_dates.items():
-            if user1 != user2:
-                # Calculate days between registrations
-                days_diff = abs((date1 - date2).days)
+        return response_times
+    
+    def calculate_registration_proximity(self):
+        """Calculate how close users registered to each other"""
+        reg_proximity = {}
+        
+        # Extract registration dates for each user
+        reg_dates = {}
+        for username, user_data in self.user_data.items():
+            reg_date = user_data.get('user_info', {}).get('registration_date')
+            if reg_date:
+                # Try to parse the registration date
+                date_formats = ['%B %d, %Y', '%d-%m-%Y', '%Y-%m-%d']
+                parsed_date = None
                 
-                # Convert to a proximity score (closer = higher score)
-                # Score ranges from 0 to 1, where 1 means same day registration
-                # and approaches 0 as the time gap increases
-                if days_diff == 0:
-                    proximity = 1.0
-                else:
-                    proximity = 1.0 / (1.0 + (days_diff / 7.0))  # Decay function
-                
-                reg_proximity[user1][user2] = {
-                    'days_diff': days_diff,
-                    'proximity_score': proximity
-                }
-    
-    return reg_proximity
-    def calculate_post_volume_correlation(self, timing_patterns):
-    """Calculate correlation between users' posting volume over time"""
-    volume_correlation = {}
-    
-    # Get users with date information
-    users_with_dates = {}
-    for username, patterns in timing_patterns.items():
-        if patterns['dates']:
-            users_with_dates[username] = patterns['dates']
-    
-    if len(users_with_dates) < 2:
-        return {}
-    
-    # Find the overall date range
-    all_dates = []
-    for username, dates in users_with_dates.items():
-        all_dates.extend(dates)
-    
-    if not all_dates:
-        return {}
-    
-    min_date = min(all_dates)
-    max_date = max(all_dates)
-    
-    # Create date bins (weekly)
-    date_range = (max_date - min_date).days
-    num_bins = max(1, date_range // 7)
-    
-    # Create a time series of post counts for each user
-    user_time_series = {}
-    for username, dates in users_with_dates.items():
-        # Initialize bins
-        bins = [0] * (num_bins + 1)
-        
-        # Count posts in each bin
-        for post_date in dates:
-            bin_index = min(num_bins, (post_date - min_date).days // 7)
-            bins[bin_index] += 1
-        
-        user_time_series[username] = bins
-    
-    # Calculate correlation between each pair of users
-    for user1, series1 in user_time_series.items():
-        volume_correlation[user1] = {}
-        
-        for user2, series2 in user_time_series.items():
-            if user1 != user2:
-                # Calculate correlation coefficient if there's enough data
-                if sum(series1) > 0 and sum(series2) > 0 and len(series1) > 1:
+                for fmt in date_formats:
                     try:
-                        correlation = np.corrcoef(series1, series2)[0, 1]
-                        volume_correlation[user1][user2] = correlation
+                        parsed_date = datetime.strptime(reg_date, fmt)
+                        break
                     except:
-                        volume_correlation[user1][user2] = 0
-                else:
-                    volume_correlation[user1][user2] = 0
+                        continue
+                
+                if parsed_date:
+                    reg_dates[username] = parsed_date
+        
+        # Calculate proximity for each pair of users
+        for user1, date1 in reg_dates.items():
+            reg_proximity[user1] = {}
+            
+            for user2, date2 in reg_dates.items():
+                if user1 != user2:
+                    # Calculate days between registrations
+                    days_diff = abs((date1 - date2).days)
+                    
+                    # Convert to a proximity score (closer = higher score)
+                    # Score ranges from 0 to 1, where 1 means same day registration
+                    # and approaches 0 as the time gap increases
+                    if days_diff == 0:
+                        proximity = 1.0
+                    else:
+                        proximity = 1.0 / (1.0 + (days_diff / 7.0))  # Decay function
+                    
+                    reg_proximity[user1][user2] = {
+                        'days_diff': days_diff,
+                        'proximity_score': proximity
+                    }
+        
+        return reg_proximity
     
-    return volume_correlation
+    def calculate_post_volume_correlation(self, timing_patterns):
+        """Calculate correlation between users' posting volume over time"""
+        volume_correlation = {}
+        
+        # Get users with date information
+        users_with_dates = {}
+        for username, patterns in timing_patterns.items():
+            if patterns['dates']:
+                users_with_dates[username] = patterns['dates']
+        
+        if len(users_with_dates) < 2:
+            return {}
+        
+        # Find the overall date range
+        all_dates = []
+        for username, dates in users_with_dates.items():
+            all_dates.extend(dates)
+        
+        if not all_dates:
+            return {}
+        
+        min_date = min(all_dates)
+        max_date = max(all_dates)
+        
+        # Create date bins (weekly)
+        date_range = (max_date - min_date).days
+        num_bins = max(1, date_range // 7)
+        
+        # Create a time series of post counts for each user
+        user_time_series = {}
+        for username, dates in users_with_dates.items():
+            # Initialize bins
+            bins = [0] * (num_bins + 1)
+            
+            # Count posts in each bin
+            for post_date in dates:
+                bin_index = min(num_bins, (post_date - min_date).days // 7)
+                bins[bin_index] += 1
+            
+            user_time_series[username] = bins
+        
+        # Calculate correlation between each pair of users
+        for user1, series1 in user_time_series.items():
+            volume_correlation[user1] = {}
+            
+            for user2, series2 in user_time_series.items():
+                if user1 != user2:
+                    # Calculate correlation coefficient if there's enough data
+                    if sum(series1) > 0 and sum(series2) > 0 and len(series1) > 1:
+                        try:
+                            correlation = np.corrcoef(series1, series2)[0, 1]
+                            volume_correlation[user1][user2] = correlation
+                        except:
+                            volume_correlation[user1][user2] = 0
+                    else:
+                        volume_correlation[user1][user2] = 0
+        
+        return volume_correlation
+    
     def calculate_final_coordination_scores(self, similarity_matrix, temporal_coordination, 
                                        reply_network, reg_date_proximity, post_volume_correlation):
-    """Calculate final coordination scores between user pairs"""
-    coordination_scores = {}
-    
-    # Weights for different factors
-    weights = {
-        'content_similarity': 0.35,
-        'temporal_coordination': 0.25,
-        'reply_frequency': 0.15,
-        'reg_proximity': 0.15,
-        'volume_correlation': 0.10
-    }
-    
-    # Normalize reply_network to get reply frequency scores
-    reply_freq_scores = {}
-    max_replies = 1  # To avoid division by zero
-    
-    for user1, replies in reply_network.items():
-        for user2, count in replies.items():
-            max_replies = max(max_replies, count)
-    
-    for user1, replies in reply_network.items():
-        reply_freq_scores[user1] = {}
-        for user2, count in replies.items():
-            reply_freq_scores[user1][user2] = count / max_replies
-    
-    # Calculate final scores
-    all_users = set()
-    for matrix in [similarity_matrix, temporal_coordination, reply_freq_scores]:
-        for user in matrix:
-            all_users.add(user)
-            for user2 in matrix[user]:
-                all_users.add(user2)
-    
-    for user1 in all_users:
-        coordination_scores[user1] = {}
+        """Calculate final coordination scores between user pairs"""
+        coordination_scores = {}
         
-        for user2 in all_users:
-            if user1 != user2:
-                # Initialize scores
-                scores = {
-                    'content_similarity': 0,
-                    'temporal_coordination': 0,
-                    'reply_frequency': 0,
-                    'reg_proximity': 0,
-                    'volume_correlation': 0
-                }
-                
-                # Assign scores from each factor
-                if user1 in similarity_matrix and user2 in similarity_matrix[user1]:
-                    scores['content_similarity'] = similarity_matrix[user1][user2]
-                
-                if user1 in temporal_coordination and user2 in temporal_coordination[user1]:
-                    scores['temporal_coordination'] = temporal_coordination[user1][user2]
-                
-                if user1 in reply_freq_scores and user2 in reply_freq_scores[user1]:
-                    scores['reply_frequency'] = reply_freq_scores[user1][user2]
-                
-                if (user1 in reg_date_proximity and user2 in reg_date_proximity[user1] and 
-                    'proximity_score' in reg_date_proximity[user1][user2]):
-                    scores['reg_proximity'] = reg_date_proximity[user1][user2]['proximity_score']
-                
-                if user1 in post_volume_correlation and user2 in post_volume_correlation[user1]:
-                    # Convert correlation (-1 to 1) to a 0-1 score
-                    correlation = post_volume_correlation[user1][user2]
-                    scores['volume_correlation'] = (correlation + 1) / 2
-                
-                # Calculate weighted average
-                weighted_score = sum(weights[factor] * score for factor, score in scores.items())
-                
-                coordination_scores[user1][user2] = {
-                    'overall_score': weighted_score,
-                    'component_scores': scores
-                }
-    
-    return coordination_scores
-
-
+        # Weights for different factors
+        weights = {
+            'content_similarity': 0.35,
+            'temporal_coordination': 0.25,
+            'reply_frequency': 0.15,
+            'reg_proximity': 0.15,
+            'volume_correlation': 0.10
+        }
+        
+        # Normalize reply_network to get reply frequency scores
+        reply_freq_scores = {}
+        max_replies = 1  # To avoid division by zero
+        
+        for user1, replies in reply_network.items():
+            for user2, count in replies.items():
+                max_replies = max(max_replies, count)
+        
+        for user1, replies in reply_network.items():
+            reply_freq_scores[user1] = {}
+            for user2, count in replies.items():
+                reply_freq_scores[user1][user2] = count / max_replies
+        
+        # Calculate final scores
+        all_users = set()
+        for matrix in [similarity_matrix, temporal_coordination, reply_freq_scores]:
+            for user in matrix:
+                all_users.add(user)
+                for user2 in matrix[user]:
+                    all_users.add(user2)
+        
+        for user1 in all_users:
+            coordination_scores[user1] = {}
+            
+            for user2 in all_users:
+                if user1 != user2:
+                    # Initialize scores
+                    scores = {
+                        'content_similarity': 0,
+                        'temporal_coordination': 0,
+                        'reply_frequency': 0,
+                        'reg_proximity': 0,
+                        'volume_correlation': 0
+                    }
+                    
+                    # Assign scores from each factor
+                    if user1 in similarity_matrix and user2 in similarity_matrix[user1]:
+                        scores['content_similarity'] = similarity_matrix[user1][user2]
+                    
+                    if user1 in temporal_coordination and user2 in temporal_coordination[user1]:
+                        scores['temporal_coordination'] = temporal_coordination[user1][user2]
+                    
+                    if user1 in reply_freq_scores and user2 in reply_freq_scores[user1]:
+                        scores['reply_frequency'] = reply_freq_scores[user1][user2]
+                    
+                    if (user1 in reg_date_proximity and user2 in reg_date_proximity[user1] and 
+                        'proximity_score' in reg_date_proximity[user1][user2]):
+                        scores['reg_proximity'] = reg_date_proximity[user1][user2]['proximity_score']
+                    
+                    if user1 in post_volume_correlation and user2 in post_volume_correlation[user1]:
+                        # Convert correlation (-1 to 1) to a 0-1 score
+                        correlation = post_volume_correlation[user1][user2]
+                        scores['volume_correlation'] = (correlation + 1) / 2
+                    
+                    # Calculate weighted average
+                    weighted_score = sum(weights[factor] * score for factor, score in scores.items())
+                    
+                    coordination_scores[user1][user2] = {
+                        'overall_score': weighted_score,
+                        'component_scores': scores
+                    }
+        
+        return coordination_scores
