@@ -8,777 +8,1024 @@ Original file is located at
 """
 
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
 import pandas as pd
 import numpy as np
-import re
-import time
 import matplotlib.pyplot as plt
 import seaborn as sns
+import requests
+from bs4 import BeautifulSoup
+import re
+import time
+import random
+from datetime import datetime, timedelta
+import cloudscraper
 import networkx as nx
-from datetime import datetime
-import plotly.express as px
-import plotly.graph_objects as go
 from collections import Counter
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
-from wordcloud import WordCloud
-import concurrent.futures
+import plotly.express as px
+import plotly.graph_objects as go
 from tqdm import tqdm
+import logging
+import os
+import json
+import warnings
+import hashlib
+from urllib.parse import urlparse, urljoin
 
-# Set page config
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Ignore warnings
+warnings.filterwarnings("ignore")
+
+# Download NLTK resources
+try:
+    nltk.download('punkt', quiet=True)
+    nltk.download('stopwords', quiet=True)
+except:
+    pass
+
+# Set page configuration
 st.set_page_config(
-    page_title="Nairaland User Coordination Analysis",
+    page_title="Nairaland Account Analysis Dashboard",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Title and description
-st.title("Nairaland User Coordination Analysis Dashboard")
+# Define color scheme
+COLORS = {
+    'primary': '#1E88E5',
+    'secondary': '#FFC107',
+    'background': '#F5F5F5',
+    'text': '#212121',
+    'accent': '#FF5722',
+}
+
+# CSS for styling
 st.markdown("""
-This dashboard scrapes and analyzes Nairaland user profiles to identify potential coordination patterns.
-Extract data like usernames, registration dates, posts, publication times, and replies to detect inauthentic behavior.
-""")
-
-# Initialize session state if not already done
-if 'scraped_data' not in st.session_state:
-    st.session_state['scraped_data'] = None
-if 'analyzed_data' not in st.session_state:
-    st.session_state['analyzed_data'] = None
-if 'network_data' not in st.session_state:
-    st.session_state['network_data'] = None
-if 'content_data' not in st.session_state:
-    st.session_state['content_data'] = None
-
-# Define helper functions for scraping
-def scrape_profile(username):
-    """Scrape profile data for a given username"""
-    url = f"https://www.nairaland.com/{username}"
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-
-        if response.status_code != 200:
-            return {
-                'username': username,
-                'registration_date': 'Not Available',
-                'last_seen': 'Not Available',
-                'total_posts': 'Not Available',
-                'total_topics': 'Not Available',
-                'profile_info': 'Failed to scrape',
-                'status': 'Error',
-                'error_message': f'Status code: {response.status_code}'
-            }
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        # Extract profile data
-        profile_data = {
-            'username': username,
-            'registration_date': None,
-            'last_seen': None,
-            'total_posts': None,
-            'total_topics': None,
-            'location': None,
-            'personal_text': None,
-            'gender': None,
-            'profile_info': None,
-            'status': 'Success',
-            'url': url
-        }
-
-        # Find registration date
-        reg_date_tr = soup.find('td', text=re.compile('Time registered', re.IGNORECASE))
-        if reg_date_tr and reg_date_tr.find_next('td'):
-            profile_data['registration_date'] = reg_date_tr.find_next('td').text.strip()
-
-        # Find last seen
-        last_seen_tr = soup.find('td', text=re.compile('Last seen', re.IGNORECASE))
-        if last_seen_tr and last_seen_tr.find_next('td'):
-            profile_data['last_seen'] = last_seen_tr.find_next('td').text.strip()
-
-        # Find posts
-        posts_link = soup.find('a', href=re.compile(f'/{username.lower()}/posts', re.IGNORECASE))
-        if posts_link:
-            posts_text = posts_link.text
-            posts_count = re.search(r'\((\d+)\)', posts_text)
-            if posts_count:
-                profile_data['total_posts'] = posts_count.group(1)
-
-        # Find topics
-        topics_link = soup.find('a', href=re.compile(f'/{username.lower()}/topics', re.IGNORECASE))
-        if topics_link:
-            topics_text = topics_link.text
-            topics_count = re.search(r'\((\d+)\)', topics_text)
-            if topics_count:
-                profile_data['total_topics'] = topics_count.group(1)
-
-        # Find location
-        location_tr = soup.find('td', text=re.compile('Location', re.IGNORECASE))
-        if location_tr and location_tr.find_next('td'):
-            profile_data['location'] = location_tr.find_next('td').text.strip()
-
-        # Find personal text
-        personal_text_tr = soup.find('td', text=re.compile('Personal text', re.IGNORECASE))
-        if personal_text_tr and personal_text_tr.find_next('td'):
-            profile_data['personal_text'] = personal_text_tr.find_next('td').text.strip()
-
-        # Find gender
-        gender_tr = soup.find('td', text=re.compile('Gender', re.IGNORECASE))
-        if gender_tr and gender_tr.find_next('td'):
-            profile_data['gender'] = gender_tr.find_next('td').text.strip()
-
-        # Get the whole profile info for analysis
-        profile_table = soup.find('table', {'summary': 'profile'})
-        if profile_table:
-            profile_data['profile_info'] = profile_table.get_text(strip=True)
-
-        return profile_data
-
-    except Exception as e:
-        return {
-            'username': username,
-            'registration_date': 'Not Available',
-            'last_seen': 'Not Available',
-            'total_posts': 'Not Available',
-            'total_topics': 'Not Available',
-            'profile_info': 'Failed to scrape',
-            'status': 'Error',
-            'error_message': str(e)
-        }
-
-def scrape_posts(username, num_pages=2):
-    """Scrape recent posts for a given username"""
-    posts_data = []
-
-    for page in range(0, num_pages):
-        url = f"https://www.nairaland.com/{username}/posts/{page}"
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-            response = requests.get(url, headers=headers, timeout=10)
-
-            if response.status_code != 200:
-                continue
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # Find all post containers
-            post_tables = soup.find_all('table', class_='narrow')
-
-            for table in post_tables:
-                try:
-                    # Extract post data
-                    post_data = {
-                        'username': username,
-                        'post_title': None,
-                        'post_content': None,
-                        'post_date': None,
-                        'post_time': None,
-                        'post_topic': None,
-                        'post_url': None
-                    }
-
-                    # Extract post title and topic
-                    topic_link = table.find('a', class_='user')
-                    if topic_link:
-                        post_data['post_topic'] = topic_link.text.strip()
-                        post_data['post_url'] = topic_link.get('href')
-
-                    # Extract post content
-                    post_body = table.find('div', class_='narrow')
-                    if post_body:
-                        post_data['post_content'] = post_body.get_text(strip=True)
-
-                    # Extract date and time
-                    post_time = table.find('span', class_='s')
-                    if post_time:
-                        datetime_text = post_time.text.strip()
-                        # Parse date and time
-                        date_match = re.search(r'(\d{1,2}:\d{2}[ap]m) On ([A-Za-z]{3} \d{1,2}, \d{4})', datetime_text)
-                        if date_match:
-                            post_data['post_time'] = date_match.group(1)
-                            post_data['post_date'] = date_match.group(2)
-                        else:
-                            # Try alternative format
-                            alt_date_match = re.search(r'(\d{1,2}:\d{2}[ap]m) On ([A-Za-z]{3} \d{1,2})', datetime_text)
-                            if alt_date_match:
-                                post_data['post_time'] = alt_date_match.group(1)
-                                post_data['post_date'] = alt_date_match.group(2)
-
-                    posts_data.append(post_data)
-                except Exception as e:
-                    continue
-
-        except Exception as e:
-            continue
-
-    return posts_data
-
-def standardize_date(date_str):
-    """Convert various date formats to a standard format"""
-    if not date_str or date_str == 'Not Available':
-        return None
-
-    # Try various date formats
-    date_formats = [
-        '%B %d, %Y',
-        '%b %d, %Y',
-        '%d %B %Y',
-        '%d %b %Y'
-    ]
-
-    clean_date = date_str.strip()
-
-    for fmt in date_formats:
-        try:
-            return datetime.strptime(clean_date, fmt).strftime('%Y-%m-%d')
-        except:
-            continue
-
-    # If we cannot parse, return as is
-    return date_str
-
-def analyze_data(profiles_df, posts_df):
-    """Analyze profile and post data for coordination patterns"""
-
-    # Create analyzed dataframe
-    analyzed_data = profiles_df.copy()
-
-    # Convert registration_date to datetime for time-based analysis
-    analyzed_data['registration_date_std'] = analyzed_data['registration_date'].apply(standardize_date)
-
-    # Add metrics for analysis
-    analyzed_data['total_posts'] = pd.to_numeric(analyzed_data['total_posts'], errors='coerce')
-    analyzed_data['total_topics'] = pd.to_numeric(analyzed_data['total_topics'], errors='coerce')
-
-    # Calculate posts per day (activity intensity)
-    analyzed_data['activity_intensity'] = analyzed_data['total_posts'] / 30  # Rough estimate
-
-    # Check for account creation clusters (accounts created around the same time)
-    dates_count = analyzed_data['registration_date_std'].value_counts()
-    analyzed_data['creation_cluster'] = analyzed_data['registration_date_std'].apply(
-        lambda x: 'Cluster' if x and dates_count.get(x, 0) > 1 else 'No Cluster'
-    )
-
-    # Find username patterns (check for similar naming conventions)
-    # Focus on WriterNig variants
-    analyzed_data['writer_variant'] = analyzed_data['username'].apply(
-        lambda x: 'Yes' if re.search(r'writ[et]+r?ni[g]+', x.lower()) else 'No'
-    )
-
-    # Add posts analysis if we have post data
-    if not posts_df.empty:
-        # Count posts per user
-        posts_per_user = posts_df['username'].value_counts()
-        analyzed_data['scraped_posts_count'] = analyzed_data['username'].apply(
-            lambda x: posts_per_user.get(x, 0)
-        )
-
-        # Check for posting time patterns
-        posts_df['hour'] = posts_df['post_time'].apply(
-            lambda x: int(re.search(r'(\d+):', x).group(1)) if x and re.search(r'(\d+):', x) else None
-        )
-
-        # Get most common posting hour per user
-        user_hours = {}
-        for user in posts_df['username'].unique():
-            user_posts = posts_df[posts_df['username'] == user]
-            if not user_posts.empty and not user_posts['hour'].isna().all():
-                hour_counts = user_posts['hour'].value_counts()
-                if not hour_counts.empty:
-                    user_hours[user] = hour_counts.index[0]
-                else:
-                    user_hours[user] = None
-            else:
-                user_hours[user] = None
-
-        analyzed_data['common_posting_hour'] = analyzed_data['username'].apply(
-            lambda x: user_hours.get(x)
-        )
-
-    # Calculate coordination likelihood based on multiple factors
-    # 1. Username patterns
-    # 2. Registration date clusters
-    # 3. Activity patterns
-    analyzed_data['coordination_likelihood'] = 0
-
-    # Add points for writer variants
-    analyzed_data.loc[analyzed_data['writer_variant'] == 'Yes', 'coordination_likelihood'] += 3
-
-    # Add points for creation clusters
-    analyzed_data.loc[analyzed_data['creation_cluster'] == 'Cluster', 'coordination_likelihood'] += 2
-
-    # Add points for similar activity patterns (posts/topics ratio)
-    if 'total_posts' in analyzed_data.columns and 'total_topics' in analyzed_data.columns:
-        analyzed_data['post_topic_ratio'] = analyzed_data['total_posts'] / analyzed_data['total_topics'].replace(0, 1)
-        # Group by similar ratios
-        ratio_mean = analyzed_data['post_topic_ratio'].mean()
-        ratio_std = analyzed_data['post_topic_ratio'].std()
-        analyzed_data['similar_ratio'] = abs(analyzed_data['post_topic_ratio'] - ratio_mean) < ratio_std
-        analyzed_data.loc[analyzed_data['similar_ratio'] == True, 'coordination_likelihood'] += 1
-
-    # Convert to categorical
-    analyzed_data['coordination_level'] = pd.cut(
-        analyzed_data['coordination_likelihood'],
-        bins=[-1, 0, 2, 4, float('inf')],
-        labels=['None', 'Low', 'Medium', 'High']
-    )
-
-    return analyzed_data
-
-def build_network_data(analyzed_data, posts_df):
-    """Build network data for visualization"""
-
-    # Create network nodes (users)
-    nodes = []
-    for _, row in analyzed_data.iterrows():
-        nodes.append({
-            'id': row['username'],
-            'username': row['username'],
-            'posts': row['total_posts'] if pd.notna(row['total_posts']) else 0,
-            'topics': row['total_topics'] if pd.notna(row['total_topics']) else 0,
-            'coordination': row['coordination_likelihood'] if pd.notna(row['coordination_likelihood']) else 0,
-            'group': 1 if row['writer_variant'] == 'Yes' else 2
-        })
-
-    # Create edges (connections between users)
-    edges = []
-
-    # Connect users in the same creation cluster
-    clusters = analyzed_data[analyzed_data['creation_cluster'] == 'Cluster']['registration_date_std'].dropna().unique()
-
-    for cluster in clusters:
-        cluster_users = analyzed_data[analyzed_data['registration_date_std'] == cluster]['username'].tolist()
-        for i in range(len(cluster_users)):
-            for j in range(i+1, len(cluster_users)):
-                edges.append({
-                    'source': cluster_users[i],
-                    'target': cluster_users[j],
-                    'type': 'registration_cluster',
-                    'weight': 2
-                })
-
-    # Connect writer variants
-    writer_variants = analyzed_data[analyzed_data['writer_variant'] == 'Yes']['username'].tolist()
-    for i in range(len(writer_variants)):
-        for j in range(i+1, len(writer_variants)):
-            edges.append({
-                'source': writer_variants[i],
-                'target': writer_variants[j],
-                'type': 'naming_pattern',
-                'weight': 3
-            })
-
-    # Connect users with similar posting patterns (if we have post data)
-    if not posts_df.empty and 'common_posting_hour' in analyzed_data.columns:
-        # Group by common posting hour
-        for hour in analyzed_data['common_posting_hour'].dropna().unique():
-            hour_users = analyzed_data[analyzed_data['common_posting_hour'] == hour]['username'].tolist()
-            for i in range(len(hour_users)):
-                for j in range(i+1, len(hour_users)):
-                    edges.append({
-                        'source': hour_users[i],
-                        'target': hour_users[j],
-                        'type': 'posting_pattern',
-                        'weight': 1
-                    })
-
-    return {'nodes': nodes, 'edges': edges}
-
-def analyze_content(posts_df):
-    """Analyze post content for common themes and coordination"""
-    if posts_df.empty:
-        return None
-
-    # Initialize NLTK if needed
-    try:
-        nltk.data.find('corpora/stopwords')
-    except LookupError:
-        nltk.download('stopwords')
-        nltk.download('punkt')
-
-    stop_words = set(stopwords.words('english'))
-
-    # Process text content
-    all_content = ' '.join(posts_df['post_content'].dropna().astype(str).tolist())
-    tokens = word_tokenize(all_content.lower())
-    filtered_tokens = [w for w in tokens if w.isalpha() and w not in stop_words and len(w) > 3]
-
-    # Get word frequencies
-    word_freq = Counter(filtered_tokens)
-    common_words = word_freq.most_common(50)
-
-    # Get themes per user
-    user_themes = {}
-    for user in posts_df['username'].unique():
-        user_posts = posts_df[posts_df['username'] == user]
-        if not user_posts.empty:
-            user_content = ' '.join(user_posts['post_content'].dropna().astype(str).tolist())
-            user_tokens = word_tokenize(user_content.lower())
-            user_filtered = [w for w in user_tokens if w.isalpha() and w not in stop_words and len(w) > 3]
-            user_freq = Counter(user_filtered)
-            user_themes[user] = user_freq.most_common(10)
-
-    # Calculate theme similarity between users
-    theme_similarity = []
-    users = list(user_themes.keys())
-    for i in range(len(users)):
-        for j in range(i+1, len(users)):
-            user1 = users[i]
-            user2 = users[j]
-
-            # Get word sets
-            words1 = {word for word, _ in user_themes[user1]}
-            words2 = {word for word, _ in user_themes[user2]}
-
-            # Calculate Jaccard similarity
-            if words1 and words2:
-                similarity = len(words1.intersection(words2)) / len(words1.union(words2))
-
-                if similarity > 0.2:  # Only include significant similarities
-                    theme_similarity.append({
-                        'user1': user1,
-                        'user2': user2,
-                        'similarity': similarity,
-                        'common_themes': list(words1.intersection(words2))
-                    })
-
-    return {
-        'word_frequencies': common_words,
-        'user_themes': user_themes,
-        'theme_similarity': theme_similarity
+<style>
+    .main {
+        background-color: #F5F5F5;
     }
+    .st-bx {
+        background-color: #FFFFFF;
+    }
+    .css-1aumxhk {
+        background-color: #1E88E5;
+        color: white !important;
+    }
+    .css-pkbazv {
+        color: #212121;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #FFFFFF;
+        border-radius: 5px 5px 0px 0px;
+        border-right: 1px solid #EEEEEE;
+        border-left: 1px solid #EEEEEE;
+        border-top: 1px solid #EEEEEE;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #1E88E5;
+        color: white !important;
+    }
+    div.stButton > button:first-child {
+        background-color: #1E88E5;
+        color: white;
+        border: none;
+    }
+    div.stButton > button:hover {
+        background-color: #0D47A1;
+        color: white;
+        border: none;
+    }
+    .reportview-container .main .block-container {
+        padding-top: 1rem;
+        padding-right: 1rem;
+        padding-left: 1rem;
+        padding-bottom: 1rem;
+    }
+    .css-18e3th9 {
+        padding: 1rem 1rem 1rem 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Streamlit UI
-with st.sidebar:
-    st.header("Control Panel")
+# Create a sidebar for navigation
+st.sidebar.image("https://www.nairaland.com/static/logo1.png", width=200)
+st.sidebar.title("Navigation")
 
-    # Input for usernames
-    default_usernames = """
-    elusive001
-    botragelad
-    holiness2100
-    uprightness100
-    truthU87
-    biodun556
-    coronaVirusPro
-    NigerianXXX
-    Kingsnairaland
-    Betscoreodds
-    Nancy2020
-    Nancy1986
-    Writernig
-    WritterNg
-    WriiterNg
-    WrriterNg
-    WriteerNig
-    WriterrNig
-    WritterNig
-    WriiterNig
-    WrriterNig
-    WriterNigg
-    WriterNiiig
-    WriterNiig
-    Ken6488
-    Dalil8
-    Slavaukraini
-    Redscorpion
-    Nigeriazoo
-    """
+# Create a sidebar for settings
+st.sidebar.header("Settings")
 
-    usernames_input = st.text_area(
-        "Enter usernames (one per line):",
-        value=default_usernames,
-        height=300
-    )
+# Add a file uploader for a proxy list
+proxy_file = st.sidebar.file_uploader("Upload proxy list (optional)", type=["txt"])
+proxies = []
+if proxy_file:
+    proxy_content = proxy_file.read().decode("utf-8")
+    proxies = [line.strip() for line in proxy_content.split("\n") if line.strip()]
+    st.sidebar.success(f"Loaded {len(proxies)} proxies")
 
-    # Parse usernames
-    usernames = [u.strip() for u in usernames_input.split('\n') if u.strip()]
+# User-Agent List
+user_agents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 11.5; rv:90.0) Gecko/20100101 Firefox/90.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_5_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15',
+]
 
-    # Scraping options
-    st.subheader("Scraping Options")
-    scrape_posts_option = st.checkbox("Scrape recent posts (slower)", value=True)
-    posts_pages = st.slider("Number of post pages to scrape", 1, 5, 2)
+# Create a directory for cache if it doesn't exist
+if not os.path.exists('cache'):
+    os.makedirs('cache')
 
-    # Action buttons
-    start_scraping = st.button("Start Scraping")
-
-    # Display info
-    st.info(f"Number of profiles to scrape: {len(usernames)}")
-
-# Main area
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Overview", "User Profiles", "Post Analysis", "Network Visualization", "Content Analysis"])
-
-# Handle scraping process
-if start_scraping:
-    with st.spinner('Scraping profiles...'):
-        # Initialize progress
-        progress_text = "Scraping profiles..."
-        progress_bar = st.progress(0)
-
-        # Scrape profiles
-        profiles_data = []
-
-        for i, username in enumerate(usernames):
-            profile = scrape_profile(username)
-            profiles_data.append(profile)
-
-            # Update progress
-            progress_bar.progress((i + 1) / len(usernames))
-            time.sleep(0.1)  # To avoid too many requests at once
-
-        profiles_df = pd.DataFrame(profiles_data)
-
-        # Scrape posts if enabled
-        posts_data = []
-        if scrape_posts_option:
-            progress_text = "Scraping posts..."
-            progress_bar.progress(0)
-
-            for i, username in enumerate(usernames):
-                user_posts = scrape_posts(username, num_pages=posts_pages)
-                posts_data.extend(user_posts)
-
-                # Update progress
-                progress_bar.progress((i + 1) / len(usernames))
-                time.sleep(0.2)  # To avoid too many requests at once
-
-        posts_df = pd.DataFrame(posts_data)
-
-        # Store data in session state
-        st.session_state['scraped_data'] = {
-            'profiles': profiles_df,
-            'posts': posts_df
+class NairalandScraper:
+    def __init__(self, user_agents, proxies=None, delay_range=(1, 3)):
+        self.user_agents = user_agents
+        self.proxies = proxies
+        self.delay_range = delay_range
+        self.scraper = cloudscraper.create_scraper(browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'mobile': False
+        })
+        
+    def get_random_user_agent(self):
+        return random.choice(self.user_agents)
+    
+    def get_random_proxy(self):
+        if not self.proxies:
+            return None
+        return random.choice(self.proxies)
+    
+    def get_cache_filename(self, username):
+        return f"cache/{username}.json"
+    
+    def load_from_cache(self, username):
+        cache_file = self.get_cache_filename(username)
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'r') as f:
+                    data = json.load(f)
+                logger.info(f"Loaded {username} from cache")
+                # Check if data is not too old (7 days)
+                if 'timestamp' in data:
+                    cache_time = datetime.fromisoformat(data['timestamp'])
+                    if datetime.now() - cache_time < timedelta(days=7):
+                        return data
+            except Exception as e:
+                logger.error(f"Error loading cache for {username}: {e}")
+        return None
+    
+    def save_to_cache(self, username, data):
+        cache_file = self.get_cache_filename(username)
+        try:
+            data['timestamp'] = datetime.now().isoformat()
+            with open(cache_file, 'w') as f:
+                json.dump(data, f)
+            logger.info(f"Saved {username} to cache")
+        except Exception as e:
+            logger.error(f"Error saving cache for {username}: {e}")
+    
+    def get_page_content(self, url, use_cache=True):
+        # Extract username from URL
+        username = url.split('/')[-1]
+        
+        # Check cache first if enabled
+        if use_cache:
+            cached_data = self.load_from_cache(username)
+            if cached_data:
+                return cached_data
+        
+        # Introduce random delay to avoid rate limiting
+        delay = random.uniform(*self.delay_range)
+        time.sleep(delay)
+        
+        headers = {
+            'User-Agent': self.get_random_user_agent(),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://www.nairaland.com/',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
         }
-
-        # Analyze data
-        analyzed_data = analyze_data(profiles_df, posts_df)
-        st.session_state['analyzed_data'] = analyzed_data
-
-        # Build network data
-        network_data = build_network_data(analyzed_data, posts_df)
-        st.session_state['network_data'] = network_data
-
-        # Analyze content
-        content_data = analyze_content(posts_df)
-        st.session_state['content_data'] = content_data
-
-        # Hide progress bar when complete
-        progress_bar.empty()
-
-        st.success('Scraping and analysis complete!')
-
-# Display data if it exists
-if st.session_state['scraped_data'] is not None:
-    scraped_data = st.session_state['scraped_data']
-    profiles_df = scraped_data['profiles']
-    posts_df = scraped_data['posts']
-
-    analyzed_data = st.session_state['analyzed_data']
-    network_data = st.session_state['network_data']
-    content_data = st.session_state['content_data']
-
-    # Tab 1: Overview
-    with tab1:
-        st.header("Analysis Overview")
-
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Users", len(profiles_df))
-        with col2:
-            high_coord = len(analyzed_data[analyzed_data['coordination_level'] == 'High'])
-            st.metric("High Coordination", high_coord)
-        with col3:
-            writer_variants = len(analyzed_data[analyzed_data['writer_variant'] == 'Yes'])
-            st.metric("WriterNig Variants", writer_variants)
-        with col4:
-            total_posts = analyzed_data['total_posts'].sum()
-            st.metric("Total Posts", f"{int(total_posts):,}")
-
-        # Coordination distribution
-        st.subheader("Coordination Level Distribution")
-        coord_counts = analyzed_data['coordination_level'].value_counts().reset_index()
-        coord_counts.columns = ['Coordination Level', 'Count']
-
-        fig = px.bar(
-            coord_counts,
-            x='Coordination Level',
-            y='Count',
-            color='Coordination Level',
-            color_discrete_map={
-                'None': 'green',
-                'Low': 'yellow',
-                'Medium': 'orange',
-                'High': 'red'
-            }
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Key findings
-        st.subheader("Key Findings")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("#### Registration Date Clusters")
-            # Check for registration date clusters
-            reg_date_counts = analyzed_data['registration_date_std'].value_counts().reset_index()
-            reg_date_counts.columns = ['Registration Date', 'Count']
-            reg_date_counts = reg_date_counts[reg_date_counts['Count'] > 1]
-
-            if not reg_date_counts.empty:
-                fig = px.bar(
-                    reg_date_counts,
-                    x='Registration Date',
-                    y='Count',
-                    title="Users registered on the same date"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            st.markdown("#### Coordination Network")
-
-            # Create simplified network viz
-            G = nx.Graph()
-
-            # Add nodes
-            for node in network_data['nodes']:
-                G.add_node(node['id'], group=node['group'])
-
-            # Add edges (only strong connections)
-            for edge in network_data['edges']:
-                if edge['weight'] >= 2:  # Only strong connections
-                    G.add_edge(edge['source'], edge['target'])
-
-            # Draw the graph
-            pos = nx.spring_layout(G, seed=42)
-
-            # Get node colors
-            node_groups = [G.nodes[node]['group'] for node in G.nodes()]
-            node_colors = ['red' if group == 1 else 'blue' for group in node_groups]
-
-            fig, ax = plt.subplots(figsize=(8, 6))
-            nx.draw_networkx(
-                G, pos, ax=ax,
-                with_labels=True,
-                node_color=node_colors,
-                node_size=200,
-                font_size=10,
-                edge_color='gray',
-                alpha=0.8
-            )
-            plt.axis('off')
-            st.pyplot(fig)
-
-    # Tab 2: User Profiles
-    with tab2:
-        st.header("User Profile Data")
-
-        # Filter options
-        st.subheader("Filter Options")
-        coord_filter = st.multiselect(
-            "Filter by Coordination Level:",
-            options=['None', 'Low', 'Medium', 'High'],
-            default=['Medium', 'High']
-        )
-
-        # Apply filters
-        filtered_df = analyzed_data
-        if coord_filter:
-            filtered_df = filtered_df[filtered_df['coordination_level'].isin(coord_filter)]
-
-        # Display in format
-        st.dataframe(
-            filtered_df[[
-                'username', 'registration_date', 'last_seen',
-                'total_posts', 'total_topics', 'writer_variant',
-                'coordination_level'
-            ]],
-            height=400,
-            use_container_width=True
-        )
-
-        # User details
-        st.subheader("User Details")
-        selected_user = st.selectbox("Select User:", analyzed_data['username'].tolist())
-
-        if selected_user:
-            user_data = analyzed_data[analyzed_data['username'] == selected_user].iloc[0]
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.markdown(f"#### {selected_user}")
-                st.markdown(f"**Registration Date:** {user_data['registration_date']}")
-                st.markdown(f"**Last Seen:** {user_data['last_seen']}")
-                st.markdown(f"**Total Posts:** {user_data['total_posts']}")
-                st.markdown(f"**Total Topics:** {user_data['total_topics']}")
-
-                if not pd.isna(user_data.get('location')):
-                    st.markdown(f"**Location:** {user_data['location']}")
-
-                if not pd.isna(user_data.get('personal_text')):
-                    st.markdown(f"**Personal Text:** {user_data['personal_text']}")
-
-            with col2:
-                st.markdown("#### Coordination Analysis")
-                st.markdown(f"**Coordination Level:** {user_data['coordination_level']}")
-                st.markdown(f"**WriterNig Variant:** {user_data['writer_variant']}")
-                st.markdown(f"**Creation Cluster:** {user_data['creation_cluster']}")
-
-                if 'common_posting_hour' in user_data and not pd.isna(user_data['common_posting_hour']):
-                    st.markdown(f"**Common Posting Hour:** {user_data['common_posting_hour']}:00")
-
-            # Display similar users
-            st.subheader("Similar Users")
-
-            if network_data:
-                similar_users = []
-
-                for edge in network_data['edges']:
-                    if edge['source'] == selected_user:
-                        similar_users.append({
-                            'username': edge['target'],
-                            'connection_type': edge['type'],
-                            'strength': edge['weight']
-                        })
-                    elif edge['target'] == selected_user:
-                        similar_users.append({
-                            'username': edge['source'],
-                            'connection_type': edge['type'],
-                            'strength': edge['weight']
-                        })
-
-                if similar_users:
-                    st.dataframe(
-                        pd.DataFrame(similar_users),
-                        use_container_width=True
-                    )
+        
+        proxy = self.get_random_proxy()
+        proxy_dict = {"http": proxy, "https": proxy} if proxy else None
+        
+        try:
+            response = self.scraper.get(url, headers=headers, proxies=proxy_dict, timeout=30)
+            if response.status_code == 200:
+                # Parse the HTML content
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Extract user profile data
+                user_data = self.extract_user_data(soup, username)
+                
+                # Extract user posts
+                posts_data = self.extract_posts_data(soup, username)
+                
+                # Combine data
+                result = {
+                    "user_info": user_data,
+                    "posts": posts_data,
+                    "raw_html": response.text  # Store raw HTML for backup analysis
+                }
+                
+                # Save to cache
+                self.save_to_cache(username, result)
+                
+                return result
+            else:
+                logger.error(f"Failed to get content from {url}: Status code {response.status_code}")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting content from {url}: {e}")
+            return None
+    
+    def extract_user_data(self, soup, username):
+        user_data = {
+            "username": username,
+            "registration_date": None,
+            "last_seen": None,
+            "signature": None,
+            "profile_views": None,
+            "follower_count": None,
+            "following_count": None,
+            "total_posts": None,
+        }
+        
+        try:
+            # Look for profile information in tables
+            profile_tables = soup.find_all('table', class_='user-profile-table')
+            if profile_tables:
+                for table in profile_tables:
+                    rows = table.find_all('tr')
+                    for row in rows:
+                        cells = row.find_all('td')
+                        if len(cells) >= 2:
+                            key = cells[0].get_text(strip=True).lower()
+                            value = cells[1].get_text(strip=True)
+                            
+                            if 'joined' in key or 'registered' in key:
+                                user_data['registration_date'] = value
+                            elif 'last seen' in key:
+                                user_data['last_seen'] = value
+                            elif 'posts' in key:
+                                user_data['total_posts'] = value
+                            elif 'followers' in key:
+                                user_data['follower_count'] = value
+                            elif 'following' in key:
+                                user_data['following_count'] = value
+                            elif 'signature' in key:
+                                user_data['signature'] = value
+                            elif 'profile views' in key:
+                                user_data['profile_views'] = value
+            
+            # If no structured data found, try to use regex on the entire page content
+            if user_data['registration_date'] is None:
+                page_text = soup.get_text()
+                # Common patterns for registration dates
+                reg_date_patterns = [
+                    r'(?:Joined|Registered):\s*([A-Za-z]+ \d+, \d{4})',
+                    r'(?:Joined|Registered):\s*(\d{2}-\d{2}-\d{4})',
+                    r'(?:Joined|Registered):\s*(\d{4}-\d{2}-\d{2})'
+                ]
+                
+                for pattern in reg_date_patterns:
+                    match = re.search(pattern, page_text)
+                    if match:
+                        user_data['registration_date'] = match.group(1)
+                        break
+                        
+            # Try to find post count if not found yet
+            if user_data['total_posts'] is None:
+                post_count_pattern = r'Posts:\s*(\d+)'
+                match = re.search(post_count_pattern, soup.get_text())
+                if match:
+                    user_data['total_posts'] = match.group(1)
+        
+        except Exception as e:
+            logger.error(f"Error extracting user data for {username}: {e}")
+        
+        return user_data
+    
+    def extract_posts_data(self, soup, username):
+        posts = []
+        
+        try:
+            # Find all post containers
+            post_containers = soup.find_all('div', class_='post')
+            if not post_containers:
+                # Try alternative selectors if the expected class isn't found
+                post_containers = soup.find_all('table', class_='post-table')
+            
+            for container in post_containers:
+                post_data = {
+                    "author": username,
+                    "post_date": None,
+                    "post_time": None,
+                    "post_content": None,
+                    "topic_title": None,
+                    "is_reply": False,
+                    "quoted_user": None,
+                    "section": None,
+                    "post_id": None,
+                    "likes": None,
+                    "shares": None
+                }
+                
+                # Try to extract post date and time
+                date_element = container.find('div', class_='post-date') or container.find('span', class_='post-date')
+                if date_element:
+                    date_text = date_element.get_text(strip=True)
+                    # Try to split date and time
+                    date_parts = re.search(r'([A-Za-z]+ \d+, \d{4})(?: at )?(\d{1,2}:\d{2} [AP]M)?', date_text)
+                    if date_parts:
+                        post_data['post_date'] = date_parts.group(1)
+                        post_data['post_time'] = date_parts.group(2)
+                
+                # Extract post content
+                content_element = container.find('div', class_='post-content') or container.find('td', class_='post-body')
+                if content_element:
+                    post_data['post_content'] = content_element.get_text(strip=True)
+                    
+                    # Check if this is a reply (has quoted text)
+                    quote_block = content_element.find('blockquote') or content_element.find('div', class_='quoted-post')
+                    if quote_block:
+                        post_data['is_reply'] = True
+                        # Try to extract quoted username
+                        quote_header = quote_block.find('div', class_='quote-header') or quote_block.find('strong')
+                        if quote_header:
+                            quoted_user_match = re.search(r'([A-Za-z0-9_]+)(?:\s+said|:)', quote_header.get_text())
+                            if quoted_user_match:
+                                post_data['quoted_user'] = quoted_user_match.group(1)
+                
+                # Try to extract topic title
+                topic_element = container.find_previous('h2') or container.find_previous('div', class_='topic-title')
+                if topic_element:
+                    post_data['topic_title'] = topic_element.get_text(strip=True)
+                
+                # Try to extract section/category
+                section_element = container.find_previous('div', class_='board') or container.find_previous('span', class_='section')
+                if section_element:
+                    post_data['section'] = section_element.get_text(strip=True)
+                
+                # Try to extract post ID
+                if 'id' in container.attrs:
+                    post_data['post_id'] = container['id']
                 else:
-                    st.info("No similar users found.")
+                    # Try to find ID in a permalink
+                    permalink = container.find('a', class_='permalink') or container.find('a', text='Link')
+                    if permalink and 'href' in permalink.attrs:
+                        post_id_match = re.search(r'#(\d+)', permalink['href'])
+                        if post_id_match:
+                            post_data['post_id'] = post_id_match.group(1)
+                
+                # Try to extract likes/shares
+                likes_element = container.find('span', class_='like-count') or container.find('a', text=re.compile(r'Likes'))
+                if likes_element:
+                    likes_match = re.search(r'(\d+)', likes_element.get_text())
+                    if likes_match:
+                        post_data['likes'] = likes_match.group(1)
+                
+                shares_element = container.find('span', class_='share-count') or container.find('a', text=re.compile(r'Shares'))
+                if shares_element:
+                    shares_match = re.search(r'(\d+)', shares_element.get_text())
+                    if shares_match:
+                        post_data['shares'] = shares_match.group(1)
+                
+                posts.append(post_data)
+        
+        except Exception as e:
+            logger.error(f"Error extracting posts for {username}: {e}")
+        
+        return posts
 
-    # Tab 3: Post Analysis
-    with tab3:
-        st.header("Post Analysis")
+class CoordinationAnalyzer:
+    def __init__(self, user_data_dict):
+        self.user_data = user_data_dict
+        self.tfidf_vectorizer = TfidfVectorizer(
+            max_features=5000,
+            stop_words='english',
+            ngram_range=(1, 3),
+            min_df=2
+        )
+        
+    def preprocess_posts(self):
+        """Preprocess posts for all users"""
+        all_posts = []
+        user_posts_dict = {}
+        
+        for username, user_data in self.user_data.items():
+            user_posts = []
+            for post in user_data.get('posts', []):
+                if post.get('post_content'):
+                    user_posts.append(post['post_content'])
+            
+            user_posts_dict[username] = user_posts
+            all_posts.extend(user_posts)
+        
+        return user_posts_dict, all_posts
+    
+    def calculate_timing_patterns(self):
+        """Calculate time patterns of posts for each user"""
+        user_timing_patterns = {}
+        
+        for username, user_data in self.user_data.items():
+            post_hours = []
+            post_days = []
+            post_dates = []
+            
+            for post in user_data.get('posts', []):
+                if post.get('post_time'):
+                    try:
+                        # Convert time string to hour
+                        time_str = post['post_time']
+                        if time_str:
+                            # Extract hour as int (0-23)
+                            hour_match = re.search(r'(\d{1,2}):(\d{2}) ([AP]M)', time_str)
+                            if hour_match:
+                                hour = int(hour_match.group(1))
+                                minute = int(hour_match.group(2))
+                                am_pm = hour_match.group(3)
+                                
+                                if am_pm.upper() == 'PM' and hour < 12:
+                                    hour += 12
+                                elif am_pm.upper() == 'AM' and hour == 12:
+                                    hour = 0
+                                    
+                                post_hours.append(hour)
+                    except:
+                        pass
+                        
+                if post.get('post_date'):
+                    try:
+                        # Extract day of week from date
+                        date_str = post['post_date']
+                        post_date = None
+                        
+                        # Handle different date formats
+                        date_formats = [
+                            '%B %d, %Y',  # e.g., January 1, 2023
+                            '%d-%m-%Y',   # e.g., 01-01-2023
+                            '%Y-%m-%d'    # e.g., 2023-01-01
+                        ]
+                        
+                        for fmt in date_formats:
+                            try:
+                                post_date = datetime.strptime(date_str, fmt)
+                                break
+                            except:
+                                continue
+                                
+                        if post_date:
+                            post_days.append(post_date.strftime('%A'))  # Day name (Monday, Tuesday, etc.)
+                            post_dates.append(post_date)
+                    except:
+                        pass
+            
+            user_timing_patterns[username] = {
+                'hours': post_hours,
+                'days': post_days,
+                'dates': post_dates
+            }
+            
+        return user_timing_patterns
+    
+    def calculate_content_similarity(self):
+        """Calculate content similarity between users based on their posts"""
+        user_posts_dict, all_posts = self.preprocess_posts()
+        
+        if not all_posts:
+            return {}, {}, {}
+        
+        # Create a combined text for each user
+        user_combined_texts = {}
+        for username, posts in user_posts_dict.items():
+            if posts:
+                user_combined_texts[username] = ' '.join(posts)
+            else:
+                user_combined_texts[username] = ""
+        
+        # Get list of usernames with non-empty posts
+        valid_usernames = [u for u, t in user_combined_texts.items() if t.strip()]
+        
+        if len(valid_usernames) < 2:
+            return {}, {}, {}
+        
+        # Create corpus of texts
+        corpus = [user_combined_texts[u] for u in valid_usernames]
+        
+        # Fit TF-IDF vectorizer
+        try:
+            tfidf_matrix = self.tfidf_vectorizer.fit_transform(corpus)
+            
+            # Calculate cosine similarity
+            cosine_sim = cosine_similarity(tfidf_matrix)
+            
+            # Create similarity matrix
+            similarity_matrix = {}
+            shared_topics = {}
+            shared_phrases = {}
+            
+            # Get the feature names (terms) from the vectorizer
+            try:
+                feature_names = self.tfidf_vectorizer.get_feature_names_out()
+            except:
+                feature_names = self.tfidf_vectorizer.get_feature_names()
+            
+            # For each pair of users
+            for i, user1 in enumerate(valid_usernames):
+                similarity_matrix[user1] = {}
+                shared_topics[user1] = {}
+                shared_phrases[user1] = {}
+                
+                for j, user2 in enumerate(valid_usernames):
+                    if i != j:  # Don't compare user with themselves
+                        similarity_matrix[user1][user2] = cosine_sim[i, j]
+                        
+                        # Identify common topics/phrases
+                        if cosine_sim[i, j] > 0.3:  # Threshold for significant similarity
+                            # Get the vectors for both users
+                            vec1 = tfidf_matrix[i].toarray().flatten()
+                            vec2 = tfidf_matrix[j].toarray().flatten()
+                            
+                            # Find terms with high TF-IDF scores in both users
+                            common_terms_indices = []
+                            for idx, (score1, score2) in enumerate(zip(vec1, vec2)):
+                                if score1 > 0.1 and score2 > 0.1:  # Both users use this term significantly
+                                    common_terms_indices.append(idx)
+                            
+                            # Get the actual terms
+                            common_terms = [feature_names[idx] for idx in common_terms_indices]
+                            
+                            # Group them into phrases (n-grams with n > 1)
+                            phrases = [term for term in common_terms if ' ' in term]
+                            topics = [term for term in common_terms if ' ' not in term]
+                            
+                            shared_topics[user1][user2] = topics
+                            shared_phrases[user1][user2] = phrases
+            
+            return similarity_matrix, shared_topics, shared_phrases
+        except Exception as e:
+            logger.error(f"Error calculating content similarity: {e}")
+            return {}, {}, {}
+    
+    def analyze_coordination(self):
+        """Perform comprehensive coordination analysis"""
+        # Get timing patterns
+        timing_patterns = self.calculate_timing_patterns()
+        
+        # Get content similarity
+        similarity_matrix, shared_topics, shared_phrases = self.calculate_content_similarity()
+        
+        # Calculate temporal coordination scores
+        temporal_coordination = self.calculate_temporal_coordination(timing_patterns)
+        
+        # Calculate reply network
+        reply_network = self.calculate_reply_network()
+        
+        # Calculate response time patterns
+        response_times = self.calculate_response_times(reply_network)
+        
+        # Calculate registration date proximity
+        reg_date_proximity = self.calculate_registration_proximity()
+        
+        # Calculate post volume correlation
+        post_volume_correlation = self.calculate_post_volume_correlation(timing_patterns)
+        
+        # Calculate final coordination scores
+        coordination_scores = self.calculate_final_coordination_scores(
+            similarity_matrix,
+            temporal_coordination,
+            reply_network,
+            reg_date_proximity,
+            post_volume_correlation
+        )
+        
+        return {
+            'similarity_matrix': similarity_matrix,
+            'shared_topics': shared_topics,
+            'shared_phrases': shared_phrases,
+            'timing_patterns': timing_patterns,
+            'temporal_coordination': temporal_coordination,
+            'reply_network': reply_network,
+            'response_times': response_times,
+            'reg_date_proximity': reg_date_proximity,
+            'post_volume_correlation': post_volume_correlation,
+            'coordination_scores': coordination_scores
+        }
+    
+    def calculate_temporal_coordination(self, timing_patterns):
+        """Calculate temporal coordination between user pairs"""
+        temporal_scores = {}
+        
+        for user1, pattern1 in timing_patterns.items():
+            temporal_scores[user1] = {}
+            
+            for user2, pattern2 in timing_patterns.items():
+                if user1 != user2:
+                    hour_score = 0
+                    day_score = 0
+                    
+                    # Calculate hour overlap score
+                    if pattern1['hours'] and pattern2['hours']:
+                        # Convert to hour frequency distributions
+                        hours1 = Counter(pattern1['hours'])
+                        hours2 = Counter(pattern2['hours'])
+                        
+                        # Normalize
+                        total1 = sum(hours1.values())
+                        total2 = sum(hours2.values())
+                        
+                        if total1 > 0 and total2 > 0:
+                            normalized_hours1 = {h: c/total1 for h, c in hours1.items()}
+                            normalized_hours2 = {h: c/total2 for h, c in hours2.items()}
+                            
+                            # Calculate overlap for each hour
+                            overlap_sum = 0
+                            for hour in range(24):
+                                h1_freq = normalized_hours1.get(hour, 0)
+                                h2_freq = normalized_hours2.get(hour, 0)
+                                overlap_sum += min(h1_freq, h2_freq)
+                            
+                            hour_score = overlap_sum
+                    
+                    # Calculate day overlap score
+                    if pattern1['days'] and pattern2['days']:
+                        days1 = Counter(pattern1['days'])
+                        days2 = Counter(pattern2['days'])
+                        
+                        total1 = sum(days1.values())
+                        total2 = sum(days2.values())
+                        
+                        if total1 > 0 and total2 > 0:
+                            normalized_days1 = {d: c/total1 for d, c in days1.items()}
+                            normalized_days2 = {d: c/total2 for d, c in days2.items()}
+                            
+                            # Calculate overlap for each day
+                            days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                            overlap_sum = 0
+                            for day in days_of_week:
+                                d1_freq = normalized_days1.get(day, 0)
+                                d2_freq = normalized_days2.get(day, 0)
+                                overlap_sum += min(d1_freq, d2_freq)
+                            
+                            day_score = overlap_sum
+                    
+                    # Combined temporal score (weight hour patterns more heavily)
+                    temporal_scores[user1][user2] = (0.7 * hour_score) + (0.3 * day_score)
+        
+        return temporal_scores
+    
+    def calculate_reply_network(self):
+        """Calculate reply network between users"""
+        reply_counts = {}
+        
+        for username, user_data in self.user_data.items():
+            reply_counts[username] = {}
+            
+            for post in user_data.get('posts', []):
+                if post.get('is_reply') and post.get('quoted_user'):
+                    quoted_user = post['quoted_user']
+                    if quoted_user in self.user_data:  # Only count replies to users in our dataset
+                        reply_counts[username][quoted_user] = reply_counts[username].get(quoted_user, 0) + 1
+        
+        return reply_counts
+    
+    def calculate_response_times(self, reply_network):
+    """Calculate how quickly users respond to each other"""
+    response_times = {}
+    
+    for user1, user_data1 in self.user_data.items():
+        response_times[user1] = {}
+        
+        # Sort user1's posts by date+time
+        sorted_posts1 = []
+        for post in user_data1.get('posts', []):
+            try:
+                if post.get('post_date') and post.get('post_time'):
+                    date_str = post['post_date']
+                    time_str = post['post_time']
+                    
+                    # Try different date formats
+                    date_formats = ['%B %d, %Y', '%d-%m-%Y', '%Y-%m-%d']
+                    parsed_date = None
+                    
+                    for fmt in date_formats:
+                        try:
+                            parsed_date = datetime.strptime(date_str, fmt)
+                            break
+                        except:
+                            continue
+                    
+                    if parsed_date and time_str:
+                        # Extract time components
+                        time_match = re.search(r'(\d{1,2}):(\d{2}) ([AP]M)', time_str)
+                        if time_match:
+                            hour = int(time_match.group(1))
+                            minute = int(time_match.group(2))
+                            am_pm = time_match.group(3)
+                            
+                            if am_pm.upper() == 'PM' and hour < 12:
+                                hour += 12
+                            elif am_pm.upper() == 'AM' and hour == 12:
+                                hour = 0
+                            
+                            # Create full datetime
+                            post_datetime = parsed_date.replace(hour=hour, minute=minute)
+                            
+                            sorted_posts1.append({
+                                'datetime': post_datetime,
+                                'is_reply': post.get('is_reply', False),
+                                'quoted_user': post.get('quoted_user'),
+                                'post_id': post.get('post_id')
+                            })
+            except:
+                pass
+        
+        # Sort by datetime
+        sorted_posts1.sort(key=lambda x: x['datetime'])
+        
+        # For each user that user1 replies to
+        for user2 in reply_network.get(user1, {}):
+            if user2 != user1:
+                response_delays = []
+                
+                # Get user2's posts
+                user_data2 = self.user_data.get(user2, {})
+                sorted_posts2 = []
+                
+                for post in user_data2.get('posts', []):
+                    try:
+                        if post.get('post_date') and post.get('post_time'):
+                            date_str = post['post_date']
+                            time_str = post['post_time']
+                            
+                            # Try different date formats
+                            date_formats = ['%B %d, %Y', '%d-%m-%Y', '%Y-%m-%d']
+                            parsed_date = None
+                            
+                            for fmt in date_formats:
+                                try:
+                                    parsed_date = datetime.strptime(date_str, fmt)
+                                    break
+                                except:
+                                    continue
+                            
+                            if parsed_date and time_str:
+                                # Extract time components
+                                time_match = re.search(r'(\d{1,2}):(\d{2}) ([AP]M)', time_str)
+                                if time_match:
+                                    hour = int(time_match.group(1))
+                                    minute = int(time_match.group(2))
+                                    am_pm = time_match.group(3)
+                                    
+                                    if am_pm.upper() == 'PM' and hour < 12:
+                                        hour += 12
+                                    elif am_pm.upper() == 'AM' and hour == 12:
+                                        hour = 0
+                                    
+                                    # Create full datetime
+                                    post_datetime = parsed_date.replace(hour=hour, minute=minute)
+                                    
+                                    sorted_posts2.append({
+                                        'datetime': post_datetime,
+                                        'post_id': post.get('post_id')
+                                    })
+                    except:
+                        pass
+                
+                # Sort user2's posts by datetime
+                sorted_posts2.sort(key=lambda x: x['datetime'])
+                
+                # For each of user1's posts that is a reply to user2
+                for post1 in sorted_posts1:
+                    if post1['is_reply'] and post1['quoted_user'] == user2:
+                        # Find the most recent post from user2 before user1's reply
+                        prev_post = None
+                        for post2 in sorted_posts2:
+                            if post2['datetime'] < post1['datetime']:
+                                prev_post = post2
+                            else:
+                                break
+                        
+                        if prev_post:
+                            # Calculate time difference in minutes
+                            time_diff = (post1['datetime'] - prev_post['datetime']).total_seconds() / 60
+                            response_delays.append(time_diff)
+                
+                # Calculate average response time if we have any valid measurements
+                if response_delays:
+                    response_times[user1][user2] = {
+                        'mean': np.mean(response_delays),
+                        'median': np.median(response_delays),
+                        'min': min(response_delays),
+                        'max': max(response_delays),
+                        'count': len(response_delays)
+                    }
+                else:
+                    response_times[user1][user2] = {
+                        'mean': None,
+                        'median': None,
+                        'min': None,
+                        'max': None,
+                        'count': 0
+                    }
+    
+    return response_times
+    def calculate_registration_proximity(self):
+    """Calculate how close users registered to each other"""
+    reg_proximity = {}
+    
+    # Extract registration dates for each user
+    reg_dates = {}
+    for username, user_data in self.user_data.items():
+        reg_date = user_data.get('user_info', {}).get('registration_date')
+        if reg_date:
+            # Try to parse the registration date
+            date_formats = ['%B %d, %Y', '%d-%m-%Y', '%Y-%m-%d']
+            parsed_date = None
+            
+            for fmt in date_formats:
+                try:
+                    parsed_date = datetime.strptime(reg_date, fmt)
+                    break
+                except:
+                    continue
+            
+            if parsed_date:
+                reg_dates[username] = parsed_date
+    
+    # Calculate proximity for each pair of users
+    for user1, date1 in reg_dates.items():
+        reg_proximity[user1] = {}
+        
+        for user2, date2 in reg_dates.items():
+            if user1 != user2:
+                # Calculate days between registrations
+                days_diff = abs((date1 - date2).days)
+                
+                # Convert to a proximity score (closer = higher score)
+                # Score ranges from 0 to 1, where 1 means same day registration
+                # and approaches 0 as the time gap increases
+                if days_diff == 0:
+                    proximity = 1.0
+                else:
+                    proximity = 1.0 / (1.0 + (days_diff / 7.0))  # Decay function
+                
+                reg_proximity[user1][user2] = {
+                    'days_diff': days_diff,
+                    'proximity_score': proximity
+                }
+    
+    return reg_proximity
+    def calculate_post_volume_correlation(self, timing_patterns):
+    """Calculate correlation between users' posting volume over time"""
+    volume_correlation = {}
+    
+    # Get users with date information
+    users_with_dates = {}
+    for username, patterns in timing_patterns.items():
+        if patterns['dates']:
+            users_with_dates[username] = patterns['dates']
+    
+    if len(users_with_dates) < 2:
+        return {}
+    
+    # Find the overall date range
+    all_dates = []
+    for username, dates in users_with_dates.items():
+        all_dates.extend(dates)
+    
+    if not all_dates:
+        return {}
+    
+    min_date = min(all_dates)
+    max_date = max(all_dates)
+    
+    # Create date bins (weekly)
+    date_range = (max_date - min_date).days
+    num_bins = max(1, date_range // 7)
+    
+    # Create a time series of post counts for each user
+    user_time_series = {}
+    for username, dates in users_with_dates.items():
+        # Initialize bins
+        bins = [0] * (num_bins + 1)
+        
+        # Count posts in each bin
+        for post_date in dates:
+            bin_index = min(num_bins, (post_date - min_date).days // 7)
+            bins[bin_index] += 1
+        
+        user_time_series[username] = bins
+    
+    # Calculate correlation between each pair of users
+    for user1, series1 in user_time_series.items():
+        volume_correlation[user1] = {}
+        
+        for user2, series2 in user_time_series.items():
+            if user1 != user2:
+                # Calculate correlation coefficient if there's enough data
+                if sum(series1) > 0 and sum(series2) > 0 and len(series1) > 1:
+                    try:
+                        correlation = np.corrcoef(series1, series2)[0, 1]
+                        volume_correlation[user1][user2] = correlation
+                    except:
+                        volume_correlation[user1][user2] = 0
+                else:
+                    volume_correlation[user1][user2] = 0
+    
+    return volume_correlation
+    def calculate_final_coordination_scores(self, similarity_matrix, temporal_coordination, 
+                                       reply_network, reg_date_proximity, post_volume_correlation):
+    """Calculate final coordination scores between user pairs"""
+    coordination_scores = {}
+    
+    # Weights for different factors
+    weights = {
+        'content_similarity': 0.35,
+        'temporal_coordination': 0.25,
+        'reply_frequency': 0.15,
+        'reg_proximity': 0.15,
+        'volume_correlation': 0.10
+    }
+    
+    # Normalize reply_network to get reply frequency scores
+    reply_freq_scores = {}
+    max_replies = 1  # To avoid division by zero
+    
+    for user1, replies in reply_network.items():
+        for user2, count in replies.items():
+            max_replies = max(max_replies, count)
+    
+    for user1, replies in reply_network.items():
+        reply_freq_scores[user1] = {}
+        for user2, count in replies.items():
+            reply_freq_scores[user1][user2] = count / max_replies
+    
+    # Calculate final scores
+    all_users = set()
+    for matrix in [similarity_matrix, temporal_coordination, reply_freq_scores]:
+        for user in matrix:
+            all_users.add(user)
+            for user2 in matrix[user]:
+                all_users.add(user2)
+    
+    for user1 in all_users:
+        coordination_scores[user1] = {}
+        
+        for user2 in all_users:
+            if user1 != user2:
+                # Initialize scores
+                scores = {
+                    'content_similarity': 0,
+                    'temporal_coordination': 0,
+                    'reply_frequency': 0,
+                    'reg_proximity': 0,
+                    'volume_correlation': 0
+                }
+                
+                # Assign scores from each factor
+                if user1 in similarity_matrix and user2 in similarity_matrix[user1]:
+                    scores['content_similarity'] = similarity_matrix[user1][user2]
+                
+                if user1 in temporal_coordination and user2 in temporal_coordination[user1]:
+                    scores['temporal_coordination'] = temporal_coordination[user1][user2]
+                
+                if user1 in reply_freq_scores and user2 in reply_freq_scores[user1]:
+                    scores['reply_frequency'] = reply_freq_scores[user1][user2]
+                
+                if (user1 in reg_date_proximity and user2 in reg_date_proximity[user1] and 
+                    'proximity_score' in reg_date_proximity[user1][user2]):
+                    scores['reg_proximity'] = reg_date_proximity[user1][user2]['proximity_score']
+                
+                if user1 in post_volume_correlation and user2 in post_volume_correlation[user1]:
+                    # Convert correlation (-1 to 1) to a 0-1 score
+                    correlation = post_volume_correlation[user1][user2]
+                    scores['volume_correlation'] = (correlation + 1) / 2
+                
+                # Calculate weighted average
+                weighted_score = sum(weights[factor] * score for factor, score in scores.items())
+                
+                coordination_scores[user1][user2] = {
+                    'overall_score': weighted_score,
+                    'component_scores': scores
+                }
+    
+    return coordination_scores
 
-        if not posts_df.empty:
-            # Filter options
-            st.subheader("Filter Options")
-            post_user_filter = st.multiselect(
-                "Filter by User:",
-                options=posts_df['username'].unique().tolist(),
-                default=[]
-            )
 
-            # Apply filters
-            filtered_posts = posts_df
-            if post_user_filter:
-                filtered_posts = filtered_posts[filtered_posts['username'].isin(post_user_filter)]
