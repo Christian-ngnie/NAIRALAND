@@ -23,17 +23,6 @@ import warnings
 import os
 from tqdm import tqdm
 
-# Suppress warnings
-warnings.filterwarnings('ignore')
-
-# Download NLTK resources
-@st.cache_resource
-def download_nltk_resources():
-    nltk.download('punkt')
-    nltk.download('stopwords')
-
-download_nltk_resources()
-
 # Set page config
 st.set_page_config(
     page_title="Nairaland User Coordination Analysis",
@@ -48,7 +37,16 @@ st.markdown("""
 This dashboard scrapes user profiles from Nairaland and analyzes potential coordination patterns between accounts.
 Upload a list of usernames to analyze posting patterns, content similarity, and potential coordinated behavior.
 """)
+# Suppress warnings
+warnings.filterwarnings('ignore')
 
+# Download NLTK resources
+@st.cache_resource
+def download_nltk_resources():
+    nltk.download('punkt')
+    nltk.download('stopwords')
+
+download_nltk_resources()
 # Initialize database
 def init_db():
     conn = sqlite3.connect('nairaland_data.db')
