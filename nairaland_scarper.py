@@ -8,643 +8,745 @@ Original file is located at
 """
 
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
 import pandas as pd
 import numpy as np
+import requests
+from bs4 import BeautifulSoup
+import re
+import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 import networkx as nx
 from datetime import datetime
-import re
+import plotly.express as px
+import plotly.graph_objects as go
 from collections import Counter
-import time
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import nltk
-from nltk.tokenize import word_tokenize
-from nltk.corpus import stopwords
-
-# Download NLTK resources
-try:
-    nltk.data.find('tokenizers/punkt')
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('punkt')
-    nltk.download('stopwords')
+import concurrent.futures
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+import os
 
 # Set page configuration
 st.set_page_config(
-    page_title="Nairaland User Coordination Analysis",
+    page_title="Nairaland Profile Analyzer",
     page_icon="📊",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Dashboard title
-st.title("Nairaland User Coordination Analysis Dashboard")
-st.write("This dashboard scrapes data from Nairaland user profiles and analyzes coordination patterns.")
+# Add custom CSS for styling
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #2e7d32;
+        text-align: center;
+        margin-bottom: 20px;
+    }
+    .sub-header {
+        font-size: 1.5rem;
+        color: #4caf50;
+        margin-bottom: 10px;
+    }
+    .insight-box {
+        background-color: #f1f8e9;
+        border-radius: 5px;
+        padding: 15px;
+        margin-bottom: 10px;
+    }
+    .stProgress > div > div > div > div {
+        background-color: #4caf50;
+    }
+    .metric-card {
+        background-color: #e8f5e9;
+        border-radius: 5px;
+        padding: 15px;
+        text-align: center;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .metric-value {
+        font-size: 1.8rem;
+        font-weight: bold;
+        color: #2e7d32;
+    }
+    .metric-label {
+        font-size: 1rem;
+        color: #555;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Sidebar for inputs
+# Main header
+st.markdown("<h1 class='main-header'>Nairaland Profile Analyzer</h1>", unsafe_allow_html=True)
+
+# URLs of Nairaland profiles
+default_urls = [
+    "https://www.nairaland.com/elusive001",
+    "https://www.nairaland.com/botragelad",
+    "https://www.nairaland.com/holiness2100",
+    "https://www.nairaland.com/uprightness100",
+    "https://www.nairaland.com/truthU87",
+    "https://www.nairaland.com/biodun556",
+    "https://www.nairaland.com/coronaVirusPro",
+    "https://www.nairaland.com/NigerianXXX",
+    "https://www.nairaland.com/Kingsnairaland",
+    "https://www.nairaland.com/Betscoreodds",
+    "https://www.nairaland.com/Nancy2020",
+    "https://www.nairaland.com/Nancy1986",
+    "https://www.nairaland.com/Writernig",
+    "https://www.nairaland.com/WritterNg",
+    "https://www.nairaland.com/WriiterNg",
+    "https://www.nairaland.com/WrriterNg",
+    "https://www.nairaland.com/WriteerNig",
+    "https://www.nairaland.com/WriterrNig",
+    "https://www.nairaland.com/WritterNig",
+    "https://www.nairaland.com/WriiterNig",
+    "https://www.nairaland.com/WrriterNig",
+    "https://www.nairaland.com/WriterNigg",
+    "https://www.nairaland.com/WriterNiiig",
+    "https://www.nairaland.com/WriterNiig",
+    "https://www.nairaland.com/Ken6488",
+    "https://www.nairaland.com/Dalil8",
+    "https://www.nairaland.com/Slavaukraini",
+    "https://www.nairaland.com/Redscorpion",
+    "https://www.nairaland.com/Nigeriazoo"
+]
+
+# Sidebar configuration
 with st.sidebar:
-    st.header("Input URLs")
-    urls_input = st.text_area(
-        "Enter Nairaland profile URLs (one per line)",
-        """https://www.nairaland.com/elusive001
-https://www.nairaland.com/botragelad
-https://www.nairaland.com/holiness2100
-https://www.nairaland.com/uprightness100
-https://www.nairaland.com/truthU87
-https://www.nairaland.com/biodun556
-https://www.nairaland.com/coronaVirusPro
-https://www.nairaland.com/NigerianXXX
-https://www.nairaland.com/Kingsnairaland
-https://www.nairaland.com/Betscoreodds
-https://www.nairaland.com/Nancy2020
-https://www.nairaland.com/Nancy1986
-https://www.nairaland.com/Writernig
-https://www.nairaland.com/WritterNg
-https://www.nairaland.com/WriiterNg
-https://www.nairaland.com/WrriterNg
-https://www.nairaland.com/WriteerNig
-https://www.nairaland.com/WriterrNig
-https://www.nairaland.com/WritterNig
-https://www.nairaland.com/WriiterNig
-https://www.nairaland.com/WrriterNig
-https://www.nairaland.com/WriterNigg
-https://www.nairaland.com/WriterNiiig
-https://www.nairaland.com/WriterNiig
-https://www.nairaland.com/Ken6488
-https://www.nairaland.com/Dalil8
-https://www.nairaland.com/Slavaukraini
-https://www.nairaland.com/Redscorpion
-https://www.nairaland.com/Nigeriazoo"""
-    )
+    st.header("Configuration")
     
-    # Extract number of posts to scrape per user
-    max_posts = st.slider("Maximum posts to scrape per user", 10, 200, 50)
+    # Option to use default URLs or enter custom ones
+    use_default = st.checkbox("Use default URLs", value=True)
     
-    # Start scraping button
-    start_scraping = st.button("Start Scraping and Analysis")
+    if not use_default:
+        custom_urls = st.text_area("Enter Nairaland profile URLs (one per line)", height=200)
+        urls = [url.strip() for url in custom_urls.split('\n') if url.strip()]
+    else:
+        urls = default_urls
+    
+    # Scraping options
+    st.subheader("Scraping Options")
+    max_posts = st.slider("Maximum posts to scrape per profile", 10, 500, 100, 10)
+    use_selenium = st.checkbox("Use Selenium (recommended for avoiding Cloudflare)", value=True)
+    
+    # Analysis options
+    st.subheader("Analysis Options")
+    time_window = st.selectbox("Time window for coordination analysis", 
+                             ["1 hour", "3 hours", "6 hours", "12 hours", "1 day", "1 week"], 
+                             index=2)
+    
+    # Start scraping
+    start_scrape = st.button("Start Scraping", type="primary")
+    
+    # About section
+    st.markdown("---")
+    st.markdown("### About")
+    st.info("""
+    This dashboard scrapes Nairaland user profiles and analyzes potential coordination patterns between accounts.
+    
+    Data collected includes:
+    - Username
+    - Post content
+    - Publication date
+    - Replies
+    - Registration date
+    """)
 
-# Function to scrape profile info
-def scrape_profile_info(url):
+# Function to set up Selenium WebDriver
+@st.cache_resource
+def get_driver():
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920x1080")
+    
+    # Add user-agent to avoid detection
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36")
+    
+    # Install ChromeDriver using webdriver_manager
     try:
-        st.write(f"Scraping profile: {url}")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        return driver
+    except Exception as e:
+        st.error(f"Failed to initialize Chrome WebDriver: {e}")
+        # Fallback to explicitly checking for ChromeDriver
+        if os.path.exists("/usr/bin/chromedriver"):
+            driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+            return driver
+        else:
+            st.error("ChromeDriver not found in the system. Please make sure Chrome and ChromeDriver are installed.")
+            return None
+
+# Function to get profile info using Selenium
+def get_profile_data_selenium(url, max_posts=100):
+    driver = get_driver()
+    if not driver:
+        return pd.DataFrame()
+    
+    try:
+        driver.get(url)
         
+        # Wait for Cloudflare to clear
+        time.sleep(5)
+        
+        # Extract username from URL
         username = url.split('/')[-1]
         
-        # Extract registration date
-        reg_date_text = None
-        time_elements = soup.find_all('td', text=re.compile('Time registered'))
-        if time_elements:
-            reg_date_text = time_elements[0].find_next_sibling('td').text.strip()
+        # Try to find registration date
+        try:
+            profile_info = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//td[contains(text(), 'Joined')]"))
+            )
+            reg_date_text = profile_info.text
+            reg_date_match = re.search(r'Joined: (.+?)(?:\(|\n|$)', reg_date_text)
+            registration_date = reg_date_match.group(1).strip() if reg_date_match else "Unknown"
+        except:
+            registration_date = "Unknown"
         
-        # Extract location
-        location = None
-        location_elements = soup.find_all('td', text=re.compile('Location'))
-        if location_elements:
-            location = location_elements[0].find_next_sibling('td').text.strip()
+        # Get user's posts
+        posts_data = []
+        current_page = 1
+        post_count = 0
         
-        # Extract time spent online
-        time_online = None
-        online_elements = soup.find_all('td', text=re.compile('Time spent online'))
-        if online_elements:
-            time_online = online_elements[0].find_next_sibling('td').text.strip()
-        
-        profile_data = {
-            'username': username,
-            'registration_date': reg_date_text,
-            'location': location,
-            'time_online': time_online,
-            'url': url
-        }
-        
-        # Get link to posts
-        posts_url = f"{url}/posts"
-        
-        return profile_data, posts_url
-    
-    except Exception as e:
-        st.error(f"Error scraping profile {url}: {str(e)}")
-        return None, None
-
-# Function to scrape posts
-def scrape_posts(posts_url, max_posts=50):
-    posts = []
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        response = requests.get(posts_url, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Find all post divs
-        post_elements = soup.find_all(['div', 'td'], class_=None, id=None)
-        
-        count = 0
-        for element in post_elements:
-            if count >= max_posts:
+        while post_count < max_posts:
+            # Posts are typically in table rows with specific IDs
+            try:
+                post_elements = WebDriverWait(driver, 10).until(
+                    EC.presence_of_all_elements_located((By.XPATH, "//td[contains(@id, 'pb')]"))
+                )
+                
+                date_elements = driver.find_elements(By.XPATH, "//td[contains(@id, 'pb')]/preceding-sibling::td")
+                
+                for i, (post_element, date_element) in enumerate(zip(post_elements, date_elements)):
+                    if post_count >= max_posts:
+                        break
+                    
+                    # Extract post content
+                    post_content = post_element.text
+                    
+                    # Extract publication date
+                    date_text = date_element.text
+                    pub_date_match = re.search(r'(\d+:\d+[ap]m) On ([a-zA-Z]+ \d+), (\d{4})', date_text)
+                    publication_date = f"{pub_date_match.group(1)} {pub_date_match.group(2)}, {pub_date_match.group(3)}" if pub_date_match else "Unknown"
+                    
+                    # Extract replies (likes) if available
+                    likes_match = re.search(r'(\d+) Likes?', post_content)
+                    replies = int(likes_match.group(1)) if likes_match else 0
+                    
+                    # Add to posts data
+                    posts_data.append({
+                        'Username': username,
+                        'Post': post_content,
+                        'Publication_Date': publication_date,
+                        'Replies': replies,
+                        'Registration_Date': registration_date,
+                        'Post_ID': f"{username}_{post_count}"
+                    })
+                    
+                    post_count += 1
+                
+                # Check if there's a next page
+                try:
+                    next_button = driver.find_element(By.XPATH, f"//a[text()='{current_page + 1}']")
+                    next_button.click()
+                    current_page += 1
+                    time.sleep(2)  # Wait for page to load
+                except:
+                    break  # No more pages
+                    
+            except Exception as e:
+                st.warning(f"Error scraping posts for {username}: {e}")
                 break
                 
-            # Look for post structure patterns
-            topic_link = element.find('a', href=re.compile(r'/\d+/'))
-            date_time_span = element.find(text=re.compile(r'(On [A-Za-z]+ \d+|[0-9]+:[0-9]+[ap]m)'))
-            
-            if topic_link and date_time_span:
-                # Found a post
-                topic = topic_link.text.strip()
-                
-                # Extract content (all text that's not in another special element)
-                content_parts = []
-                for item in element.contents:
-                    if isinstance(item, str) and item.strip():
-                        content_parts.append(item.strip())
-                
-                content = " ".join(content_parts)
-                if not content and element.get_text():
-                    content = element.get_text().strip()
-                
-                # Extract date and time
-                date_match = re.search(r'On ([A-Za-z]+ \d+)', str(element))
-                time_match = re.search(r'([0-9]+:[0-9]+[ap]m)', str(element))
-                
-                post_date = date_match.group(1) if date_match else "Unknown"
-                post_time = time_match.group(1) if time_match else "Unknown"
-                
-                # Extract likes and shares if available
-                likes = 0
-                shares = 0
-                likes_match = re.search(r'(\d+) Like', str(element))
-                shares_match = re.search(r'(\d+) Share', str(element))
-                
-                if likes_match:
-                    likes = int(likes_match.group(1))
-                if shares_match:
-                    shares = int(shares_match.group(1))
-                
-                posts.append({
-                    'topic': topic,
-                    'content': content,
-                    'date': post_date,
-                    'time': post_time,
-                    'likes': likes,
-                    'shares': shares
-                })
-                count += 1
-        
-        return posts
+        return pd.DataFrame(posts_data)
     
     except Exception as e:
-        st.error(f"Error scraping posts from {posts_url}: {str(e)}")
-        return []
+        st.error(f"Error scraping profile {url}: {e}")
+        return pd.DataFrame()
+    
+    finally:
+        driver.quit()
 
-# Main analysis functions
-def analyze_temporal_patterns(user_posts_df):
-    st.subheader("Temporal Posting Analysis")
-    
-    # Convert date and time to datetime
-    user_posts_df['datetime'] = pd.to_datetime(
-        user_posts_df['date'] + ' ' + user_posts_df['time'], 
-        format='%b %d %I:%M%p', 
-        errors='coerce'
-    )
-    
-    # Extract hour of day
-    user_posts_df['hour'] = user_posts_df['datetime'].dt.hour
-    
-    # Posting frequency by hour
-    hour_counts = user_posts_df['hour'].value_counts().sort_index()
-    
-    # Plot posting time distribution
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.bar(hour_counts.index, hour_counts.values)
-    ax.set_xlabel('Hour of Day (24h format)')
-    ax.set_ylabel('Number of Posts')
-    ax.set_title('Posting Time Distribution')
-    ax.set_xticks(range(0, 24))
-    st.pyplot(fig)
-    
-    # Posting patterns by user
-    user_hour_matrix = pd.crosstab(user_posts_df['username'], user_posts_df['hour'])
-    
-    # Heatmap of user posting times
-    fig, ax = plt.subplots(figsize=(12, len(user_hour_matrix) * 0.4 + 2))
-    sns.heatmap(user_hour_matrix, cmap="YlGnBu", ax=ax)
-    ax.set_title('User Posting Times Heatmap')
-    ax.set_xlabel('Hour of Day')
-    ax.set_ylabel('Username')
-    st.pyplot(fig)
-    
-    st.write("### Coordination Insights:")
-    st.write("""
-    - Users posting at similar times may indicate coordination
-    - Clusters of activity at unusual hours (like late night/early morning) can suggest automated behavior
-    - Synchronized posting patterns across multiple accounts may indicate a single operator
-    """)
-    
-    return user_hour_matrix
-
-def analyze_content_similarity(user_posts_df):
-    st.subheader("Content Similarity Analysis")
-    
-    # Aggregate all posts by user
-    user_content = user_posts_df.groupby('username')['content'].apply(' '.join).reset_index()
-    
-    # Create TF-IDF vectors
-    stop_words = set(stopwords.words('english'))
-    vectorizer = TfidfVectorizer(stop_words=stop_words, min_df=2)
-    
-    # Check if we have enough content
-    if len(user_content) > 1:
-        tfidf_matrix = vectorizer.fit_transform(user_content['content'])
+# Function to get profile info using Requests/BeautifulSoup (fallback)
+def get_profile_data_bs4(url, max_posts=100):
+    try:
+        # Extract username from URL
+        username = url.split('/')[-1]
         
-        # Calculate cosine similarity
-        cosine_sim = cosine_similarity(tfidf_matrix)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://www.nairaland.com/',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0',
+        }
         
-        # Create similarity DataFrame
-        similarity_df = pd.DataFrame(
-            cosine_sim, 
-            index=user_content['username'], 
-            columns=user_content['username']
-        )
+        # Get the profile page
+        response = requests.get(url, headers=headers, timeout=15)
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Plot heatmap
-        fig, ax = plt.subplots(figsize=(10, 8))
-        sns.heatmap(similarity_df, annot=True, cmap='YlGnBu', vmin=0, vmax=1, ax=ax)
-        ax.set_title('Content Similarity Between Users')
-        st.pyplot(fig)
+        # Try to find registration date
+        try:
+            profile_info = soup.find('td', text=re.compile('Joined'))
+            reg_date_text = profile_info.text if profile_info else "Unknown"
+            reg_date_match = re.search(r'Joined: (.+?)(?:\(|\n|$)', reg_date_text)
+            registration_date = reg_date_match.group(1).strip() if reg_date_match else "Unknown"
+        except:
+            registration_date = "Unknown"
         
-        # Identify highly similar users
-        high_similarity_pairs = []
-        for i in range(len(similarity_df.index)):
-            for j in range(i+1, len(similarity_df.columns)):
-                if similarity_df.iloc[i, j] > 0.7:  # Threshold for high similarity
-                    high_similarity_pairs.append((
-                        similarity_df.index[i],
-                        similarity_df.columns[j],
-                        similarity_df.iloc[i, j]
-                    ))
+        # Get user's posts
+        posts_data = []
+        current_page = 1
+        post_count = 0
         
-        if high_similarity_pairs:
-            st.write("### High Similarity User Pairs:")
-            for user1, user2, sim in sorted(high_similarity_pairs, key=lambda x: x[2], reverse=True):
-                st.write(f"- {user1} and {user2}: {sim:.2f} similarity score")
+        while post_count < max_posts:
+            page_url = url if current_page == 1 else f"{url}/{current_page}"
+            page_response = requests.get(page_url, headers=headers, timeout=15)
+            page_soup = BeautifulSoup(page_response.text, 'html.parser')
+            
+            # Posts are typically in table cells with id starting with 'pb'
+            post_elements = page_soup.find_all('td', id=re.compile('^pb'))
+            
+            if not post_elements:
+                break
                 
-            # Create network visualization for similar users
-            G = nx.Graph()
-            for user in user_content['username']:
-                G.add_node(user)
+            for post_element in post_elements:
+                if post_count >= max_posts:
+                    break
+                
+                # Extract post content
+                post_content = post_element.text
+                
+                # Extract publication date
+                try:
+                    date_element = post_element.find_previous_sibling('td')
+                    date_text = date_element.text if date_element else "Unknown"
+                    pub_date_match = re.search(r'(\d+:\d+[ap]m) On ([a-zA-Z]+ \d+), (\d{4})', date_text)
+                    publication_date = f"{pub_date_match.group(1)} {pub_date_match.group(2)}, {pub_date_match.group(3)}" if pub_date_match else "Unknown"
+                except:
+                    publication_date = "Unknown"
+                
+                # Extract replies (likes) if available
+                likes_match = re.search(r'(\d+) Likes?', post_content)
+                replies = int(likes_match.group(1)) if likes_match else 0
+                
+                # Add to posts data
+                posts_data.append({
+                    'Username': username,
+                    'Post': post_content,
+                    'Publication_Date': publication_date,
+                    'Replies': replies,
+                    'Registration_Date': registration_date,
+                    'Post_ID': f"{username}_{post_count}"
+                })
+                
+                post_count += 1
             
-            for user1, user2, sim in high_similarity_pairs:
-                G.add_edge(user1, user2, weight=sim)
-            
-            # Plot network
-            fig, ax = plt.subplots(figsize=(12, 10))
-            pos = nx.spring_layout(G, seed=42)
-            nx.draw_networkx_nodes(G, pos, node_size=700, node_color='skyblue', ax=ax)
-            nx.draw_networkx_labels(G, pos, font_size=12, ax=ax)
-            
-            # Draw edges with width based on similarity
-            for u, v, d in G.edges(data=True):
-                nx.draw_networkx_edges(
-                    G, pos, edgelist=[(u, v)], 
-                    width=d['weight'] * 5, 
-                    alpha=0.7, edge_color='gray', 
-                    ax=ax
-                )
-            
-            plt.title("User Similarity Network")
-            plt.axis('off')
-            st.pyplot(fig)
-        else:
-            st.write("No highly similar users detected based on content.")
-    else:
-        st.write("Not enough users with content to perform similarity analysis.")
+            # Check if there's a next page by looking for a link with the next page number
+            next_page_link = page_soup.find('a', text=str(current_page + 1))
+            if next_page_link:
+                current_page += 1
+                time.sleep(1)  # Be nice to the server
+            else:
+                break
+                
+        return pd.DataFrame(posts_data)
     
-    # Common phrases analysis
-    st.subheader("Common Phrases Analysis")
-    
-    # Function to extract ngrams
-    def extract_ngrams(text, n=2):
-        tokens = word_tokenize(text.lower())
-        tokens = [token for token in tokens if token.isalnum() and token not in stop_words]
-        ngrams = [' '.join(tokens[i:i+n]) for i in range(len(tokens)-n+1)]
-        return ngrams
-    
-    # Extract common phrases across users
-    all_bigrams = []
-    for content in user_posts_df['content']:
-        if isinstance(content, str):
-            all_bigrams.extend(extract_ngrams(content, 2))
-    
-    # Get most common phrases
-    common_phrases = Counter(all_bigrams).most_common(20)
-    
-    # Display common phrases
-    if common_phrases:
-        phrase_df = pd.DataFrame(common_phrases, columns=['Phrase', 'Count'])
-        
-        # Plot common phrases
-        fig, ax = plt.subplots(figsize=(10, 8))
-        sns.barplot(x='Count', y='Phrase', data=phrase_df, ax=ax)
-        ax.set_title('Most Common Phrases Across Users')
-        st.pyplot(fig)
-        
-        st.write("""
-        ### Content Analysis Insights:
-        - High similarity between accounts suggests potential coordination or the same operator
-        - Common unusual phrases across accounts may indicate shared talking points
-        - Similar formatting, hashtags, or unique expressions can reveal coordination
-        """)
-    else:
-        st.write("No common phrases found across users.")
-    
-    return similarity_df if 'similarity_df' in locals() else None
+    except Exception as e:
+        st.error(f"Error scraping profile {url}: {e}")
+        return pd.DataFrame()
 
-def analyze_account_creation_patterns(profiles_df):
-    st.subheader("Account Creation Timeline Analysis")
+# Function to parse dates uniformly
+def parse_date(date_str):
+    if not date_str or date_str == "Unknown":
+        return None
     
-    # Convert registration dates to datetime
-    profiles_df['reg_date_dt'] = pd.to_datetime(
-        profiles_df['registration_date'], 
-        format='%B %d, %Y', 
-        errors='coerce'
-    )
+    try:
+        # Various date formats used on Nairaland
+        formats = [
+            "%I:%M%p On %b %d, %Y",  # 12:34pm On Jan 01, 2023
+            "%I:%M%p On %B %d, %Y",  # 12:34pm On January 01, 2023
+            "%d-%b-%y",              # 01-Jan-23
+            "%B %d, %Y",             # January 01, 2023
+            "%b %d, %Y"              # Jan 01, 2023
+        ]
+        
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except:
+                continue
+        
+        return None
+    except:
+        return None
+
+# Function to analyze coordination patterns
+def analyze_coordination(df, time_window_str="6 hours"):
+    if df.empty:
+        return {
+            "coordination_pairs": pd.DataFrame(),
+            "time_clusters": pd.DataFrame(),
+            "similar_content": pd.DataFrame(),
+            "post_timeline": pd.DataFrame(),
+            "user_activity": pd.DataFrame()
+        }
     
-    # Sort by registration date
-    sorted_profiles = profiles_df.sort_values('reg_date_dt')
+    # Convert time window string to hours
+    time_window_dict = {
+        "1 hour": 1,
+        "3 hours": 3,
+        "6 hours": 6,
+        "12 hours": 12,
+        "1 day": 24,
+        "1 week": 168
+    }
+    time_window_hours = time_window_dict.get(time_window_str, 6)
     
-    # Plot account creation timeline
-    if not sorted_profiles['reg_date_dt'].isna().all():
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.scatter(
-            sorted_profiles['reg_date_dt'], 
-            range(len(sorted_profiles)), 
-            s=100, alpha=0.7
-        )
+    # Process publication dates
+    df['Datetime'] = df['Publication_Date'].apply(parse_date)
+    
+    # Remove entries with invalid dates
+    df_valid = df.dropna(subset=['Datetime'])
+    
+    if df_valid.empty:
+        return {
+            "coordination_pairs": pd.DataFrame(),
+            "time_clusters": pd.DataFrame(),
+            "similar_content": pd.DataFrame(),
+            "post_timeline": pd.DataFrame(),
+            "user_activity": pd.DataFrame()
+        }
+    
+    # 1. Find users posting within the same time window
+    coordination_pairs = []
+    
+    # Create a sorted list of posts by time
+    posts_by_time = df_valid.sort_values('Datetime')
+    
+    # Find posts within time window of each other
+    for i, row1 in posts_by_time.iterrows():
+        window_end = row1['Datetime'] + pd.Timedelta(hours=time_window_hours)
+        window_posts = posts_by_time[
+            (posts_by_time['Datetime'] >= row1['Datetime']) & 
+            (posts_by_time['Datetime'] <= window_end) &
+            (posts_by_time['Username'] != row1['Username'])
+        ]
         
-        # Add labels for each point
-        for i, (idx, row) in enumerate(sorted_profiles.iterrows()):
-            if not pd.isna(row['reg_date_dt']):
-                ax.text(
-                    row['reg_date_dt'], i, 
-                    f"  {row['username']}", 
-                    va='center', fontsize=9
-                )
-        
-        ax.set_yticks([])
-        ax.set_xlabel('Registration Date')
-        ax.set_title('Account Creation Timeline')
-        ax.grid(True, linestyle='--', alpha=0.7)
-        
-        # Identify clusters of account creations
-        profiles_df['reg_date_dt_ordinal'] = profiles_df['reg_date_dt'].map(lambda x: x.toordinal() if not pd.isna(x) else None)
-        date_diffs = []
-        
-        for i in range(1, len(sorted_profiles)):
-            current_date = sorted_profiles.iloc[i]['reg_date_dt_ordinal']
-            prev_date = sorted_profiles.iloc[i-1]['reg_date_dt_ordinal']
+        for j, row2 in window_posts.iterrows():
+            time_diff = (row2['Datetime'] - row1['Datetime']).total_seconds() / 3600  # in hours
+            coordination_pairs.append({
+                'User1': row1['Username'],
+                'User2': row2['Username'],
+                'Post1_ID': row1['Post_ID'],
+                'Post2_ID': row2['Post_ID'],
+                'Time_Difference_Hours': time_diff,
+                'Date1': row1['Datetime'],
+                'Date2': row2['Datetime']
+            })
+    
+    coordination_df = pd.DataFrame(coordination_pairs)
+    
+    # 2. Identify time clusters (times when multiple users post)
+    if not coordination_df.empty:
+        # Bin all posts by hour to find clusters
+        df_valid['Hour'] = df_valid['Datetime'].dt.floor('H')
+        time_clusters = df_valid.groupby('Hour')['Username'].nunique().reset_index()
+        time_clusters.columns = ['Hour', 'Unique_Users']
+        time_clusters = time_clusters.sort_values('Unique_Users', ascending=False)
+    else:
+        time_clusters = pd.DataFrame(columns=['Hour', 'Unique_Users'])
+    
+    # 3. Check for similar content patterns
+    # Simple similarity - check for same words or patterns
+    def extract_keywords(text):
+        if not isinstance(text, str):
+            return []
+        # Simple keyword extraction
+        text = text.lower()
+        # Remove common words
+        stopwords = ['the', 'and', 'is', 'in', 'to', 'a', 'of', 'for', 'on', 'with', 'as', 'this', 'that']
+        words = re.findall(r'\b\w+\b', text)
+        return [w for w in words if len(w) > 3 and w not in stopwords]
+    
+    df_valid['Keywords'] = df_valid['Post'].apply(extract_keywords)
+    
+    similar_content = []
+    users = df_valid['Username'].unique()
+    
+    for i in range(len(users)):
+        for j in range(i+1, len(users)):
+            user1, user2 = users[i], users[j]
             
-            if current_date is not None and prev_date is not None:
-                date_diffs.append((
-                    sorted_profiles.iloc[i-1]['username'],
-                    sorted_profiles.iloc[i]['username'],
-                    current_date - prev_date
-                ))
-        
-        # Identify accounts created close together (within 3 days)
-        close_creation = [(u1, u2, diff) for u1, u2, diff in date_diffs if diff <= 3]
-        
-        if close_creation:
-            st.write("### Accounts Created Within 3 Days of Each Other:")
-            for u1, u2, diff in close_creation:
-                st.write(f"- {u1} and {u2}: {diff} days apart")
-        
-        st.pyplot(fig)
-        
-        st.write("""
-        ### Account Creation Insights:
-        - Multiple accounts created in a short timeframe may indicate coordinated creation
-        - Batches of accounts created around specific events can signal preparation for influence operations
-        - Sequential naming patterns with close creation dates strongly suggest the same operator
-        """)
-    else:
-        st.write("Could not parse registration dates for timeline analysis.")
+            # Get posts from both users
+            posts1 = df_valid[df_valid['Username'] == user1]['Keywords'].tolist()
+            posts2 = df_valid[df_valid['Username'] == user2]['Keywords'].tolist()
+            
+            # Flatten lists
+            keywords1 = [k for sublist in posts1 for k in sublist]
+            keywords2 = [k for sublist in posts2 for k in sublist]
+            
+            if not keywords1 or not keywords2:
+                continue
+            
+            # Find common keywords
+            common = set(keywords1) & set(keywords2)
+            
+            if common:
+                similarity = len(common) / min(len(set(keywords1)), len(set(keywords2)))
+                similar_content.append({
+                    'User1': user1,
+                    'User2': user2,
+                    'Common_Keywords': list(common),
+                    'Similarity_Score': similarity
+                })
+    
+    # 4. Create post timeline for visualization
+    post_timeline = df_valid[['Username', 'Datetime', 'Post_ID']].copy()
+    
+    # 5. User activity patterns
+    user_activity = df_valid.groupby('Username').agg({
+        'Post_ID': 'count',
+        'Datetime': ['min', 'max']
+    }).reset_index()
+    
+    user_activity.columns = ['Username', 'Post_Count', 'First_Post', 'Last_Post']
+    user_activity['Active_Days'] = (user_activity['Last_Post'] - user_activity['First_Post']).dt.total_seconds() / (60*60*24)
+    user_activity['Posts_Per_Day'] = user_activity['Post_Count'] / user_activity['Active_Days'].clip(lower=1)  # Avoid division by zero
+    
+    return {
+        "coordination_pairs": pd.DataFrame(coordination_pairs) if coordination_pairs else pd.DataFrame(),
+        "time_clusters": time_clusters,
+        "similar_content": pd.DataFrame(similar_content) if similar_content else pd.DataFrame(),
+        "post_timeline": post_timeline,
+        "user_activity": user_activity
+    }
 
-def analyze_naming_patterns(profiles_df):
-    st.subheader("Username Pattern Analysis")
+# Main scraping and analysis function
+def scrape_and_analyze(urls, max_posts, use_selenium, time_window):
+    start_time = time.time()
+    all_data = pd.DataFrame()
     
-    # Group similar usernames
-    username_patterns = {}
-    
-    # Look for number patterns
-    num_pattern = re.compile(r'.*?(\d+)$')
-    num_users = []
-    
-    for username in profiles_df['username']:
-        match = num_pattern.match(username)
-        if match:
-            num_users.append((username, match.group(1)))
-    
-    if num_users:
-        st.write("### Usernames with Numerical Patterns:")
-        for username, num in num_users:
-            st.write(f"- {username}: ends with {num}")
-    
-    # Look for common prefixes
-    prefixes = {}
-    for username in profiles_df['username']:
-        for length in range(3, 7):  # Check prefixes of length 3-6
-            if len(username) >= length:
-                prefix = username[:length].lower()
-                if prefix not in prefixes:
-                    prefixes[prefix] = []
-                prefixes[prefix].append(username)
-    
-    # Filter for prefixes with multiple usernames
-    common_prefixes = {prefix: users for prefix, users in prefixes.items() if len(users) > 1}
-    
-    if common_prefixes:
-        st.write("### Usernames with Common Prefixes:")
-        for prefix, users in common_prefixes.items():
-            st.write(f"- Prefix '{prefix}': {', '.join(users)}")
-    
-    # Check for Levenshtein distance (string similarity)
-    from Levenshtein import distance
-    
-    similar_names = []
-    usernames = profiles_df['username'].tolist()
-    
-    for i in range(len(usernames)):
-        for j in range(i+1, len(usernames)):
-            dist = distance(usernames[i].lower(), usernames[j].lower())
-            if dist <= 2 and dist > 0:  # Names very similar but not identical
-                similar_names.append((usernames[i], usernames[j], dist))
-    
-    if similar_names:
-        st.write("### Similar Usernames (Levenshtein Distance ≤ 2):")
-        for name1, name2, dist in similar_names:
-            st.write(f"- {name1} and {name2}: distance = {dist}")
-    
-    st.write("""
-    ### Username Pattern Insights:
-    - Sequential numbers in usernames may indicate batch account creation
-    - Very similar usernames with minor variations often belong to the same operator
-    - Consistent naming patterns across accounts suggest coordinated creation
-    """)
-
-def analyze_activity_metrics(profiles_df, user_posts_df):
-    st.subheader("User Activity Metrics")
-    
-    # Calculate posts per day since registration
-    profiles_df['days_since_reg'] = None
-    
-    for idx, row in profiles_df.iterrows():
-        if pd.notna(row['reg_date_dt']):
-            days = (datetime.now() - row['reg_date_dt']).days
-            profiles_df.at[idx, 'days_since_reg'] = max(1, days)  # Avoid division by zero
-    
-    # Count posts per user
-    post_counts = user_posts_df['username'].value_counts().reset_index()
-    post_counts.columns = ['username', 'post_count']
-    
-    # Merge with profiles
-    activity_df = profiles_df.merge(post_counts, on='username', how='left')
-    activity_df['post_count'] = activity_df['post_count'].fillna(0)
-    
-    # Calculate posts per day
-    activity_df['posts_per_day'] = activity_df.apply(
-        lambda row: row['post_count'] / row['days_since_reg'] if pd.notna(row['days_since_reg']) else None, 
-        axis=1
-    )
-    
-    # Display activity metrics
-    if not activity_df['posts_per_day'].isna().all():
-        # Plot posts per day
-        fig, ax = plt.subplots(figsize=(12, 8))
-        activity_plot = activity_df.sort_values('posts_per_day', ascending=False)
-        
-        sns.barplot(
-            x='posts_per_day', 
-            y='username', 
-            data=activity_plot.head(15),  # Top 15 most active users
-            ax=ax
-        )
-        
-        ax.set_title('Posts Per Day Since Registration')
-        ax.set_xlabel('Average Posts Per Day')
-        ax.set_ylabel('Username')
-        st.pyplot(fig)
-        
-        st.write("""
-        ### Activity Metrics Insights:
-        - Unusually high posting rates may indicate automated activity
-        - Similar posting frequencies across multiple accounts suggest coordination
-        - Accounts with synchronized activity spikes often have a common operator
-        """)
-    else:
-        st.write("Insufficient data to calculate posting frequency.")
-
-# Main execution
-if start_scraping:
-    urls = urls_input.strip().split('\n')
-    
-    # Create progress bar
+    # Create a progress bar
     progress_bar = st.progress(0)
-    status_text = st.empty()
+    scraping_status = st.empty()
     
-    # Lists to store results
-    all_profiles = []
-    all_posts = []
+    scraping_status.info("Setting up scraper...")
     
-    # Scrape each profile
+    # Process each URL
     for i, url in enumerate(urls):
-        status_text.text(f"Scraping {url}...")
-        profile_data, posts_url = scrape_profile_info(url)
+        user = url.split('/')[-1]
+        scraping_status.info(f"Scraping {user} ({i+1}/{len(urls)})...")
         
-        if profile_data and posts_url:
-            all_profiles.append(profile_data)
-            
-            # Scrape posts
-            status_text.text(f"Scraping posts for {profile_data['username']}...")
-            user_posts = scrape_posts(posts_url, max_posts)
-            
-            # Add username to posts
-            for post in user_posts:
-                post['username'] = profile_data['username']
-            
-            all_posts.extend(user_posts)
+        if use_selenium:
+            df = get_profile_data_selenium(url, max_posts)
+        else:
+            df = get_profile_data_bs4(url, max_posts)
+        
+        all_data = pd.concat([all_data, df], ignore_index=True)
         
         # Update progress
-        progress_value = (i + 1) / len(urls)
-        progress_bar.progress(progress_value)
-        time.sleep(0.1)  # Small delay to avoid overwhelming the server
+        progress_bar.progress((i + 1) / len(urls))
     
-    # Convert to DataFrames
-    profiles_df = pd.DataFrame(all_profiles)
-    user_posts_df = pd.DataFrame(all_posts)
+    # Complete progress
+    scraping_status.success(f"Scraping completed for {len(urls)} profiles in {time.time() - start_time:.2f} seconds!")
     
-    # Display scraped data
-    st.header("Scraped Data Overview")
+    # Analyze the data for coordination patterns
+    scraping_status.info("Analyzing coordination patterns...")
+    analysis_results = analyze_coordination(all_data, time_window)
     
-    # Profile information
-    st.subheader("User Profiles")
-    st.dataframe(profiles_df)
+    scraping_status.success("Analysis complete!")
     
-    # Post information
-    st.subheader("User Posts")
-    st.dataframe(user_posts_df.head(20))  # Show just the first 20 for brevity
+    return all_data, analysis_results
+
+# Main dashboard layout
+if start_scrape:
+    with st.spinner('Scraping and analyzing profiles... This may take a while.'):
+        # Scrape and analyze
+        data, analysis = scrape_and_analyze(urls, max_posts, use_selenium, time_window)
+        
+        # Cache the results
+        st.session_state['data'] = data
+        st.session_state['analysis'] = analysis
+        st.session_state['scraped'] = True
+
+# Display results if data is available
+if 'scraped' in st.session_state and st.session_state['scraped']:
+    data = st.session_state['data']
+    analysis = st.session_state['analysis']
     
-    # Run analysis functions
-    st.header("Coordination Pattern Analysis")
-    
-    # Display analysis tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Temporal Patterns", 
-        "Content Similarity", 
-        "Account Creation", 
-        "Username Patterns",
-        "Activity Metrics"
-    ])
-    
-    with tab1:
-        analyze_temporal_patterns(user_posts_df)
-    
-    with tab2:
-        analyze_content_similarity(user_posts_df)
-    
-    with tab3:
-        analyze_account_creation_patterns(profiles_df)
-    
-    with tab4:
-        analyze_naming_patterns(profiles_df)
-    
-    with tab5:
-        analyze_activity_metrics(profiles_df, user_posts_df)
-    
-    # Final summary
-    st.header("Summary of Coordination Findings")
-    st.write("""
-    Based on the analysis, potential coordination patterns have been identified:
-    
-    1. **Temporal Coordination**: 
-       - Users posting at similar times or showing synchronized activity patterns
-       - Accounts active during unusual hours (potential automation)
-    
-    2. **Content Coordination**:
-       - Accounts sharing similar content, phrasing, or talking points
-       - Common narrative themes across multiple accounts
-    
-    3. **Account Patterns**:
-       - Clusters of accounts created in close succession
-       - Similar naming patterns suggesting common operator
-       - Comparable activity levels across related accounts
-    
-    The dashboard provides multiple visualizations to help identify these patterns and understand the relationships between the analyzed accounts.
-    """)
+    # Check if any data was scraped
+    if data.empty:
+        st.error("No data was scraped. Please check the URLs and try again.")
+    else:
+        # Display overview metrics
+        st.markdown("<h2 class='sub-header'>Overview</h2>", unsafe_allow_html=True)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div class='metric-value'>{data['Username'].nunique()}</div>
+                <div class='metric-label'>Users Scraped</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col2:
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div class='metric-value'>{len(data)}</div>
+                <div class='metric-label'>Total Posts</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col3:
+            avg_posts = data.groupby('Username').size().mean()
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div class='metric-value'>{avg_posts:.1f}</div>
+                <div class='metric-label'>Avg Posts per User</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col4:
+            total_replies = data['Replies'].sum()
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div class='metric-value'>{total_replies}</div>
+                <div class='metric-label'>Total Replies</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # User Activity Tab
+        st.markdown("<h2 class='sub-header'>User Activity</h2>", unsafe_allow_html=True)
+        
+        # User posts over time 
+        if not analysis['post_timeline'].empty:
+            # Convert to datetime if needed
+            if not pd.api.types.is_datetime64_dtype(analysis['post_timeline']['Datetime']):
+                analysis['post_timeline']['Datetime'] = pd.to_datetime(analysis['post_timeline']['Datetime'])
+            
+            # Create the timeline
+            fig = px.scatter(
+                analysis['post_timeline'],
+                x='Datetime',
+                y='Username',
+                color='Username',
+                title='User Posting Timeline',
+                height=500
+            )
+            
+            fig.update_layout(
+                xaxis_title='Date & Time',
+                yaxis_title='Username',
+                legend_title='Username',
+                hovermode='closest'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Add histogram of posts by hour of day
+            if 'Datetime' in analysis['post_timeline'].columns:
+                analysis['post_timeline']['Hour_of_Day'] = analysis['post_timeline']['Datetime'].dt.hour
+                
+                hour_counts = analysis['post_timeline'].groupby(['Hour_of_Day', 'Username']).size().reset_index(name='Count')
+                
+                fig_hour = px.bar(
+                    hour_counts,
+                    x='Hour_of_Day',
+                    y='Count',
+                    color='Username',
+                    title='Post Distribution by Hour of Day',
+                    labels={'Hour_of_Day': 'Hour (24-hour format)', 'Count': 'Number of Posts'},
+                    height=400
+                )
+                
+                st.plotly_chart(fig_hour, use_container_width=True)
+        
+        # User activity metrics
+        if not analysis['user_activity'].empty:
+            st.markdown("<h3>User Activity Metrics</h3>", unsafe_allow_html=True)
+            st.dataframe(analysis['user_activity'].sort_values('Post_Count', ascending=False), use_container_width=True)
+            
+            # Visualization of post counts
+            fig_posts = px.bar(
+                analysis['user_activity'].sort_values('Post_Count', ascending=False),
+                x='Username',
+                y='Post_Count',
+                title='Number of Posts per User',
+                color='Username',
+                height=400
+            )
+            
+            st.plotly_chart(fig_posts, use_container_width=True)
+        
+        # Coordination Analysis
+        st.markdown("<h2 class='sub-header'>Coordination Analysis</h2>", unsafe_allow_html=True)
+        
+        # Time-based coordination
+        if not analysis['coordination_pairs'].empty:
+            st.markdown("<h3>Users Posting in Close Time Proximity</h3>", unsafe_allow_html=True)
+            
+            # Count coordination pairs between users
+            coord_counts = analysis['coordination_pairs'].groupby(['User1', 'User2']).size().reset_index(name='Count')
+            coord_counts = coord_counts.sort_values('Count', ascending=False)
+            
+            st.dataframe(coord_counts.head(20), use_container_width=True)
+            
+            # Create network graph of coordination
+            if len(coord_counts) > 0:
+                # Only keep strong connections
+                threshold = coord_counts['Count'].quantile(0.5)  # Adjust as needed
+                strong_coords = coord_counts[coord_counts['Count'] > threshold]
+                
+                # Create graph
+                G = nx.Graph()
+                
+                for _, row in strong_coords.iterrows():
+                    G.add_edge(row['User1'], row['User2'], weight=row['Count'])
+                
+                # Create positions
+                pos = nx.spring_layout(G, seed=42)
+                
+                # Create the figure
+                fig = go.Figure()
+                
+                # Add edges
+                edge_trace = []
+                for edge in G.edges(data=True):
+                    x0, y0 = pos[edge[0]]
+                    x1, y1 = pos[edge[1]]
+                    weight = edge[2]['weight']
+                    width = 1 + weight / strong_coords['Count'].max() * 5
+                    
+                    edge_trace.append(
+                        go.Scatter(
+                            x=[x0, x1, None],
+                            y=[y0, y1, None],
+                            line=dict(width=width, color='rgba(150,150,150,0.7)'),
+                            hoverinfo='none',
+                            mode='lines'
+                        )
+                    )
+                
+                for trace in edge_trace:
+                    fig.add_trace(trace)
+                
+                # Add nodes
+                node_adjacencies = []
+                node_sizes = []
+                for node in G.nodes():
+                    adjacencies = len(list(G.neighbors(node)))
+                    node_adjacencies.append(adjacencies)
+                    post_count = analysis['user_activity'][analysis['user_activity']['Username'] == node]['Post_Count'].values[0] if node in analysis['user_activity']['Username'].values else 0
