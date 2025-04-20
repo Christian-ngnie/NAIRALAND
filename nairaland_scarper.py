@@ -170,12 +170,12 @@ def get_driver():
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920x1080")
     
-    # Set Chromium binary location (updated path)
-    options.binary_location = "/usr/bin/chromium-browser"
+    # Set correct Chromium binary path for Debian
+    options.binary_location = "/usr/bin/chromium"
 
     try:
-        # Explicitly specify matching ChromeDriver version
-        driver_path = ChromeDriverManager(version="120.0.6099.109").install()
+        # Install compatible ChromeDriver version
+        driver_path = ChromeDriverManager(version="114.0.5735.90").install()
         os.chmod(driver_path, 0o755)
         
         service = Service(executable_path=driver_path)
