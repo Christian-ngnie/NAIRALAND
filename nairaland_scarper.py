@@ -208,6 +208,11 @@ def get_profile_data_selenium(url, max_posts=100):
     
     try:
         driver.get(url)
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.TAG_NAME, 'body'))
+        )
+    try:
+        driver.get(url)
         
         # Wait for Cloudflare to clear
         time.sleep(5)
