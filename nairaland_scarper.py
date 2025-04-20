@@ -30,6 +30,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import os
+import zipfile
 
 # Set page configuration
 st.set_page_config(
@@ -161,29 +162,48 @@ with st.sidebar:
 # Function to set up Selenium WebDriver
 @st.cache_resource
 def get_driver():
+    # Set up Chrome options
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920x1080")
-    
-    # Add user-agent to avoid detection
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36")
-    
-    # Install ChromeDriver using webdriver_manager
+
+    # Streamlit Cloud-specific setup
+    if "IS_STREAMLIT" in os.environ:
+        # Install Chrome in the temporary directory
+        import subprocess
+        import requests
+
+        # Download and install Chrome
+        chrome_url = "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+        chrome_path = "/tmp/chrome.deb"
+        
+        # Download Chrome
+        response = requests.get(chrome_url)
+        with open(chrome_path, "wb") as f:
+            f.write(response.content)
+        
+        # Extract Chrome
+        os.makedirs("/tmp/chrome", exist_ok=True)
+        subprocess.run(["ar", "x", chrome_path], check=True, cwd="/tmp/chrome")
+        subprocess.run(["tar", "-xf", "/tmp/chrome/data.tar.xz", "-C", "/tmp/chrome"], check=True)
+        
+        # Set Chrome binary location
+        options.binary_location = "/tmp/chrome/opt/google/chrome/google-chrome"
+
     try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        # Install ChromeDriver using webdriver_manager
+        driver = webdriver.Chrome(
+            service=Service(ChromeDriverManager().install()),
+            options=options
+        )
         return driver
     except Exception as e:
         st.error(f"Failed to initialize Chrome WebDriver: {e}")
-        # Fallback to explicitly checking for ChromeDriver
-        if os.path.exists("/usr/bin/chromedriver"):
-            driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
-            return driver
-        else:
-            st.error("ChromeDriver not found in the system. Please make sure Chrome and ChromeDriver are installed.")
-            return None
+        return None
 
 # Function to get profile info using Selenium
 def get_profile_data_selenium(url, max_posts=100):
