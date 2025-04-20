@@ -1,0 +1,8 @@
+chromium
+chromium-driver
+libnss3
+libxss1
+libasound2
+libxtst6
+libgconf-2-4
+libgbm-dev
