@@ -31,6 +31,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import os
 import zipfile
+import subprocess
 
 # Set page configuration
 st.set_page_config(
