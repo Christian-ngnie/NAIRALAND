@@ -239,10 +239,6 @@ def scrape_user_posts(username, pages=10, delay=1):
                     except Exception as e:
                         st.error(f"Error processing post: {str(e)}")
                         continue
-                except Exception as e:
-                    st.error(f"Error processing post {post_id}: {str(e)}")
-                    continue
-                    
             # Pagination logic
             if not soup.find('a', href=f"/username/posts/page"):
                 break
