@@ -176,7 +176,7 @@ def scrape_user_posts(username, pages=10, delay=1):
     registration_date = scrape_user_profile(username)  # Get reg date from profile page
     
     try:
-        for page in range(pages):
+        for page in range(1, pages):
             url = f"https://www.nairaland.com/username/posts/page-1"
             if page == 1:
                 url = f"https://www.nairaland.com/username/posts"
@@ -189,61 +189,62 @@ def scrape_user_posts(username, pages=10, delay=1):
                     
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Find all posts (using your observed HTML structure)
-            posts = soup.find_all('td', id=lambda x: x and x.startswith('pb'))
+            # Find all post blocks (each post has 2 <tr> elements: metadata and content)
+            all_trs = soup.find_all('tr')
             
-            for post in posts:
-                try:
-                    post_id = post.get('id', '').replace('pb', '')
-                    post_text = post.get_text(separator=' ', strip=True)
+            for i, tr in enumerate(all_trs):
+                # Metadata row (section, topic, datetime)
+                if 'bold l pu' in tr.get('class', []):
+                    meta_tr = tr
+                    content_tr = all_trs[i + 1] if i + 1 < len(all_trs) else None
                     
-                    # Get metadata from preceding <tr class="bold l pu">
-                    meta_row = post.find_previous('tr', class_='bold l pu')
-                    if not meta_row: continue
+                    if not content_tr or not content_tr.find('td', id=lambda x: x and x.startswith('pb')):
+                        continue
                     
-                    # Extract section and topic
-                    section = meta_row.find('a', href=lambda x: x and x.startswith('/')).text.strip()
-                    topic_elem = meta_row.find('a', href=lambda x: x and '#' in x)
-                    topic = topic_elem.text.strip() if topic_elem else "Unknown"
-                    
-                    # Extract datetime
-                    datetime_span = meta_row.find('span', class_='s')
-                    if datetime_span:
+                    try:
+                        # Extract metadata from meta_tr
+                        section = meta_tr.find('a', href=lambda x: x and x.startswith('/')).text.strip()
+                        topic_elem = meta_tr.find('a', href=lambda x: x and '#' in x)
+                        topic = topic_elem.text.strip() if topic_elem else "Unknown"
+                        
+                        # Extract datetime
+                        datetime_span = meta_tr.find('span', class_='s')
                         datetime_text = ' '.join([b.text.strip() for b in datetime_span.find_all('b')])
-                        if ' On ' in datetime_text:
-                            time_str, date_str = datetime_text.split(' On ', 1)
-                        else:
-                            time_str = datetime_text
-                            date_str = "Today"
-                    else:
-                        time_str, date_str = "", "Today"
-                    
-                    # Parse dates
-                    post_date, post_time, timestamp = parse_date_time(date_str, time_str)
-                    
-                    # Extract likes/shares
-                    likes = int(post.find('b', id=lambda x: x and x.startswith('lpt')).text.split()[0]) if post.find('b', id=lambda x: x and x.startswith('lpt')) else 0
-                    shares = int(post.find('b', id=lambda x: x and x.startswith('shb')).text.split()[0]) if post.find('b', id=lambda x: x and x.startswith('shb')) else 0
-                    
-                    posts_data.append({
-                        'post_id': post_id,
-                        'username': username,
-                        'post_text': clean_text(post_text),
-                        'post_date': post_date,
-                        'post_time': post_time,
-                        'timestamp': timestamp,
-                        'section': section,
-                        'topic': topic,
-                        'likes': likes,
-                        'shares': shares
-                    })
-                    
+                        time_str, date_str = datetime_text.split(' On ') if ' On ' in datetime_text else (datetime_text, "Today")
+                        
+                        # Extract post content
+                        post_td = content_tr.find('td', id=lambda x: x and x.startswith('pb'))
+                        post_text = post_td.get_text(separator=' ', strip=True)
+                        
+                        # Parse date/time and other fields
+                        post_date, post_time, timestamp = parse_date_time(date_str, time_str)
+                        
+                        # Extract likes/shares
+                        likes = int(post_td.find('b', id=lambda x: x and x.startswith('lpt')).text.split()[0]) if post_td.find('b', id=lambda x: x and x.startswith('lpt')) else 0
+                        shares = int(post_td.find('b', id=lambda x: x and x.startswith('shb')).text.split()[0]) if post_td.find('b', id=lambda x: x and x.startswith('shb')) else 0
+                        
+                        posts_data.append({
+                            'post_id': post_td.get('id', '').replace('pb', ''),
+                            'username': username,
+                            'post_text': clean_text(post_text),
+                            'post_date': post_date,
+                            'post_time': post_time,
+                            'timestamp': timestamp,
+                            'section': section,
+                            'topic': topic,
+                            'likes': likes,
+                            'shares': shares
+                        })
+                        
+                    except Exception as e:
+                        st.error(f"Error processing post: {str(e)}")
+                        continue
                 except Exception as e:
                     st.error(f"Error processing post {post_id}: {str(e)}")
                     continue
                     
             # Pagination logic
-            if not soup.find('a', href=f"/{username}/posts/{page+1}"):
+            if not soup.find('a', href=f"/username/posts/page"):
                 break
                 
             time.sleep(delay)
@@ -263,23 +264,21 @@ def scrape_multiple_users(usernames, pages_per_user=10, max_workers=5, delay=1):
     with st.spinner(f"Scraping data for {len(usernames)} users..."):
         progress_bar = st.progress(0)
         
+        # Use a wrapper to isolate Streamlit context
+        def worker(username):
+            try:
+                return scrape_user_posts(username, pages_per_user, delay)
+            except Exception as e:
+                st.error(f"Error processing {username}: {str(e)}")
+                return None
+        
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all scraping tasks
-            future_to_username = {
-                executor.submit(scrape_user_posts, username, pages_per_user, delay): username
-                for username in usernames
-            }
+            futures = {executor.submit(worker, username): username for username in usernames}
             
-            # Process results as they complete
-            for i, future in enumerate(concurrent.futures.as_completed(future_to_username)):
-                username = future_to_username[future]
-                try:
-                    result = future.result()
+            for i, future in enumerate(concurrent.futures.as_completed(futures)):
+                result = future.result()
+                if result:
                     results.append(result)
-                except Exception as e:
-                    st.error(f"Error processing {username}: {str(e)}")
-                
-                # Update progress
                 progress_bar.progress((i + 1) / len(usernames))
     
     return results
