@@ -163,41 +163,25 @@ with st.sidebar:
 # Function to set up Selenium WebDriver
 @st.cache_resource
 def get_driver():
-    # Set up Chrome options
-    options = Options()
+    options = webdriver.ChromeOptions()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920x1080")
-    options.add_argument("--single-process")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36")
-
-    # Streamlit Cloud specific setup
-    if "IS_STREAMLIT" in os.environ:
-        # Install required system packages
-        subprocess.run(['apt-get', 'update'], check=True)
-        subprocess.run(['apt-get', 'install', '-y', 'gnupg'], check=True)
-        
-        # Install Chromium browser
-        subprocess.run(['apt-get', 'install', '-y', 'chromium'], check=True)
-        options.binary_location = '/usr/bin/chromium'
+    
+    # Set Chromium binary location (updated path)
+    options.binary_location = "/usr/bin/chromium-browser"
 
     try:
-        # Install ChromeDriver using webdriver_manager
-        driver_path = ChromeDriverManager().install()
-        os.chmod(driver_path, 0o755)  # Ensure execute permissions
+        # Explicitly specify matching ChromeDriver version
+        driver_path = ChromeDriverManager(version="120.0.6099.109").install()
+        os.chmod(driver_path, 0o755)
         
-        # Create driver service
         service = Service(executable_path=driver_path)
-        
-        driver = webdriver.Chrome(
-            service=service,
-            options=options
-        )
-        return driver
+        return webdriver.Chrome(service=service, options=options)
     except Exception as e:
-        st.error(f"WebDriver initialization failed: {str(e)}")
+        st.error(f"Driver setup failed: {str(e)}")
         return None
 
 # Function to get profile info using Selenium
