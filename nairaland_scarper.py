@@ -157,15 +157,15 @@ def scrape_user_posts(username, pages=10, delay=1):
     registration_date = None
     
     try:
-        for page in range(pages):
-            url = f"https://www.nairaland.com/{username}/posts/{page}"
-            if page == 0:
-                url = f"https://www.nairaland.com/{username}/posts"
+        for page in range(1, pages):
+            url = f"https://www.nairaland.com/username/posts/page-1"
+            if page == 1:
+                url = f"https://www.nairaland.com/username/posts"
                 
             response = requests.get(url, headers=get_headers(), timeout=10)
             
             if response.status_code != 200:
-                if page > 0:  # If we've already scraped some pages, just break
+                if page > 1:  # If we've already scraped some pages, just break
                     break
                 else:  # If first page fails, raise error
                     raise Exception(f"Failed to fetch page for {username}")
@@ -177,7 +177,7 @@ def scrape_user_posts(username, pages=10, delay=1):
                 raise Exception(f"User {username} does not exist")
             
             # Try to get registration date (only on first page)
-            if page == 0:
+            if page == 1:
                 location_text = soup.find(string=lambda text: "Location:" in text if text else False)
                 if location_text:
                     location_parent = location_text.parent
@@ -186,7 +186,7 @@ def scrape_user_posts(username, pages=10, delay=1):
                         registration_date = reg_date_text.strip().replace("Registered:", "").strip()
             
             # Find all posts
-            posts = soup.find_all('td', id=lambda x: x and x.startswith('pb'))
+            posts = soup.find_all('div', class_='body') #soup.find_all('td', id=lambda x: x and x.startswith('pb'))
             
             # If no posts are found and it's the first page, the user might not have any posts
             if not posts and page == 0:
@@ -197,13 +197,14 @@ def scrape_user_posts(username, pages=10, delay=1):
             for post in posts:
                 try:
                     # Get post ID
-                    post_id = post.get('id', '').replace('pb', '')
+                    post_id = post.find_previous('a', {'name': True})['name'] #post.get('id', '').replace('pb', '')
                     
                     # Get post content
                     post_text = post.get_text(separator=' ', strip=True)
                     
                     # Get post metadata from previous element
-                    meta_td = post.find_previous('td', {'name': lambda x: x and x.startswith('msg')})
+                    meta_td = post.find_previous('div', class_='autopagerize_page_element')
+                    #meta_td = post.find_previous('td', {'name': lambda x: x and x.startswith('msg')})
                     
                     if meta_td:
                         # Extract section
@@ -216,7 +217,8 @@ def scrape_user_posts(username, pages=10, delay=1):
                         topic_url = topic_elem['href'] if topic_elem and 'href' in topic_elem.attrs else ""
                         
                         # Extract date and time
-                        datetime_span = meta_td.find('span', {'class': lambda x: x and 'b' in x}) or meta_td.find('b')
+                        datetime_span = meta_td.find('span', class_='s')
+                        #datetime_span = meta_td.find('span', {'class': lambda x: x and 'b' in x}) or meta_td.find('b')
                         datetime_text = datetime_span.text.strip() if datetime_span else ""
                         
                         date_str = ""
@@ -323,7 +325,7 @@ def save_to_database(data, conn):
     for user_data in data:
         username = user_data['username']
         registration_date = user_data['registration_date']
-        profile_url = f"https://www.nairaland.com/{username}"
+        profile_url = f"https://www.nairaland.com/username"
         
         # Insert or update user
         cursor.execute('''
