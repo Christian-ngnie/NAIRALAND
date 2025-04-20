@@ -1,14 +1,1 @@
-chromium
-chromium-driver
-libgl1
-libx11-6
-libxcb1
-libxdamage1
-libxext6
-libxfixes3
-libxrandr2
-libxtst6
-libasound2
-libatk1.0-0
-libatk-bridge2.0-0
-libgbm1
+
