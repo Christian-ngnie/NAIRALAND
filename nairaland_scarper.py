@@ -169,40 +169,34 @@ def get_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920x1080")
+    options.add_argument("--single-process")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36")
 
-    # Streamlit Cloud-specific setup
+    # Streamlit Cloud specific setup
     if "IS_STREAMLIT" in os.environ:
-        # Install Chrome in the temporary directory
-        import subprocess
-        import requests
-
-        # Download and install Chrome
-        chrome_url = "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
-        chrome_path = "/tmp/chrome.deb"
+        # Install required system packages
+        subprocess.run(['apt-get', 'update'], check=True)
+        subprocess.run(['apt-get', 'install', '-y', 'gnupg'], check=True)
         
-        # Download Chrome
-        response = requests.get(chrome_url)
-        with open(chrome_path, "wb") as f:
-            f.write(response.content)
-        
-        # Extract Chrome
-        os.makedirs("/tmp/chrome", exist_ok=True)
-        subprocess.run(["ar", "x", chrome_path], check=True, cwd="/tmp/chrome")
-        subprocess.run(["tar", "-xf", "/tmp/chrome/data.tar.xz", "-C", "/tmp/chrome"], check=True)
-        
-        # Set Chrome binary location
-        options.binary_location = "/tmp/chrome/opt/google/chrome/google-chrome"
+        # Install Chromium browser
+        subprocess.run(['apt-get', 'install', '-y', 'chromium'], check=True)
+        options.binary_location = '/usr/bin/chromium'
 
     try:
         # Install ChromeDriver using webdriver_manager
+        driver_path = ChromeDriverManager().install()
+        os.chmod(driver_path, 0o755)  # Ensure execute permissions
+        
+        # Create driver service
+        service = Service(executable_path=driver_path)
+        
         driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()),
+            service=service,
             options=options
         )
         return driver
     except Exception as e:
-        st.error(f"Failed to initialize Chrome WebDriver: {e}")
+        st.error(f"WebDriver initialization failed: {str(e)}")
         return None
 
 # Function to get profile info using Selenium
