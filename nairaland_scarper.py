@@ -116,22 +116,50 @@ def parse_date_time(date_str, time_str):
     try:
         now = datetime.datetime.now()
         
+        # Clean up strings
+        date_str = date_str.strip()
+        time_str = time_str.strip()
+        
         if "Today" in date_str:
             date = now.date()
         elif "Yesterday" in date_str:
             date = (now - datetime.timedelta(days=1)).date()
         else:
-            date_parts = re.findall(r'(\w+)\s+(\d+)(?:,\s+(\d+))?', date_str)
-            if date_parts:
-                month, day, year = date_parts[0]
-                year = int(year) if year else now.year
-                month_num = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6, 
-                             "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}.get(month, 1)
-                date = datetime.date(year, month_num, int(day))
+            # Handle dates like "Apr 01", "Apr 01, 2024"
+            if ',' in date_str:
+                # Format: "Apr 01, 2024"
+                try:
+                    date = datetime.datetime.strptime(date_str, "%b %d, %Y").date()
+                except:
+                    try:
+                        date = datetime.datetime.strptime(date_str, "%B %d, %Y").date()
+                    except:
+                        print(f"Failed to parse date with comma: {date_str}")
+                        date = now.date()
             else:
-                date = now.date()
+                # Format: "Apr 01" (no year)
+                try:
+                    # Parse without year, then add current year
+                    date_without_year = datetime.datetime.strptime(date_str, "%b %d")
+                    date = date_without_year.replace(year=now.year).date()
+                    
+                    # If this date is in the future, use last year
+                    if date > now.date():
+                        date = date.replace(year=now.year - 1)
+                except:
+                    try:
+                        date_without_year = datetime.datetime.strptime(date_str, "%B %d")
+                        date = date_without_year.replace(year=now.year).date()
+                        
+                        # If this date is in the future, use last year
+                        if date > now.date():
+                            date = date.replace(year=now.year - 1)
+                    except:
+                        print(f"Failed to parse date without comma: {date_str}")
+                        date = now.date()
         
-        time_match = re.search(r'(\d+):(\d+)([ap]m)', time_str)
+        # Parse time (e.g., "10:30am")
+        time_match = re.search(r'(\d+):(\d+)([ap]m)', time_str, re.IGNORECASE)
         if time_match:
             hour, minute, ampm = time_match.groups()
             hour = int(hour)
@@ -139,16 +167,19 @@ def parse_date_time(date_str, time_str):
                 hour += 12
             elif ampm.lower() == 'am' and hour == 12:
                 hour = 0
-            time = datetime.time(hour, int(minute))
+            time_obj = datetime.time(hour, int(minute))
         else:
-            time = datetime.time(0, 0)
+            print(f"Failed to parse time: {time_str}")
+            time_obj = datetime.time(0, 0)
         
-        datetime_obj = datetime.datetime.combine(date, time)
+        # Combine date and time
+        datetime_obj = datetime.datetime.combine(date, time_obj)
         timestamp = int(datetime_obj.timestamp())
         
-        return date.strftime('%Y-%m-%d'), time.strftime('%H:%M'), timestamp
+        return date.strftime('%Y-%m-%d'), time_obj.strftime('%H:%M'), timestamp
     except Exception as e:
-        return "2023-01-01", "00:00", int(now.timestamp())
+        print(f"Error parsing date/time: {str(e)}, date_str: {date_str}, time_str: {time_str}")
+        return now.strftime('%Y-%m-%d'), "00:00", int(now.timestamp())
 
 def scrape_user_profile(username):
     """Scrape registration date from profile page"""
@@ -159,9 +190,9 @@ def scrape_user_profile(username):
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
                 for p_tag in soup.find_all('p'):
-                    text = p_tag.get_text(strip=True)
-                    if "Time registered:" in text:
-                        return text.replace("Time registered:", "").strip()
+                    p_text = p_tag.get_text(strip=True)
+                    if "Time registered:" in p_text:
+                        return p_text.replace("Time registered:", "")[1].strip()
             time.sleep(1)
         except Exception as e:
             print(f"Error fetching profile: {str(e)}")
@@ -174,34 +205,42 @@ def scrape_user_posts(username, pages=10, delay=1):
     
     try:
         url = f"https://www.nairaland.com/{username}/posts"
-        for page in range(pages):
+        for page_num in range(pages):
             for attempt in range(3):
                 try:
+                    print(f"Scraping page {page_num+1} for {username}, URL: {url}")
                     response = requests.get(url, headers=get_headers(), timeout=10)
+                    
                     if response.status_code != 200:
+                        print(f"Error: Status code {response.status_code}")
                         time.sleep(delay)
                         continue
                     
                     soup = BeautifulSoup(response.content, "html.parser")
-                    # Look for table rows - Nairaland posts are in table rows
-                    post_rows = soup.find_all("tr")
                     
-                    # Process post rows in pairs (header row + content row)
-                    for i in range(0, len(post_rows) - 1, 2):
+                    # Find all post row pairs (header + content)
+                    rows = soup.find_all("tr")
+                    i = 0
+                    
+                    while i < len(rows) - 1:
                         try:
-                            # Check if this is a post header row
-                            header_row = post_rows[i]
+                            # Check if this is a header row
+                            header_row = rows[i]
                             header_cell = header_row.find("td", class_="bold")
                             
                             if not header_cell:
+                                i += 1
                                 continue
-                                
-                            # Extract post metadata from header row
+                            
+                            # Extract post metadata
                             time_span = header_cell.find("span", class_="s")
                             if not time_span:
+                                i += 1
                                 continue
                                 
                             datetime_text = time_span.get_text(strip=True)
+                            
+                            # Parse date and time
                             if " On " in datetime_text:
                                 time_str, date_str = datetime_text.split(' On ', 1)
                             else:
@@ -209,38 +248,54 @@ def scrape_user_posts(username, pages=10, delay=1):
                             
                             # Extract section and topic
                             links = header_cell.find_all("a")
-                            section = links[0].text if len(links) > 0 else "Unknown"
-                            topic = links[1].text if len(links) > 1 else "Unknown"
-                            topic_url = links[1]['href'] if len(links) > 1 and 'href' in links[1].attrs else ""
+                            section = ""
+                            topic = ""
+                            topic_url = ""
                             
-                            # Get post ID from the anchor name
+                            if len(links) >= 1:
+                                section = links[0].get_text(strip=True)
+                            if len(links) >= 2:
+                                topic = links[1].get_text(strip=True)
+                                topic_url = links[1].get('href', '')
+                            
+                            # Get post ID
                             post_id = None
                             for anchor in header_cell.find_all("a"):
-                                if anchor.has_attr('name') and anchor['name'].startswith('msg'):
+                                if anchor.has_attr('name') and (
+                                    anchor['name'].startswith('msg') or 
+                                    anchor['name'].isdigit()
+                                ):
                                     post_id = anchor['name']
                                     break
                             
-                            if not post_id and header_cell.has_attr('id'):
-                                post_id = header_cell['id']
+                            if not post_id:
+                                post_id = f"{username}_{len(posts_data)}"
                             
-                            # Extract post content from content row
-                            content_row = post_rows[i+1]
-                            content_cell = content_row.find("td", class_="l")
-                            
-                            if not content_cell:
+                            # Extract content from next row
+                            content_row = rows[i+1] if i+1 < len(rows) else None
+                            if not content_row:
+                                i += 1
                                 continue
                                 
-                            # Extract post content
-                            content_div = content_cell.find("div", class_="narrow")
-                            if not content_div:
-                                post_text = clean_text(content_cell.get_text(strip=True))
-                            else:
-                                post_text = clean_text(content_div.get_text(separator=" ", strip=True))
+                            content_cell = content_row.find("td", id=lambda x: x and x.startswith("pb"))
+                            if not content_cell:
+                                content_cell = content_row.find("td", class_=lambda x: x and "pd" in x.split())
                             
-                            # Parse date/time
+                            if not content_cell:
+                                i += 1
+                                continue
+                            
+                            # Extract post text
+                            content_div = content_cell.find("div", class_="narrow")
+                            if content_div:
+                                post_text = clean_text(content_div.get_text(separator=" ", strip=True))
+                            else:
+                                post_text = clean_text(content_cell.get_text(strip=True))
+                            
+                            # Parse date/time properly
                             post_date, post_time, timestamp = parse_date_time(date_str, time_str)
                             
-                            # Extract likes and shares if available
+                            # Extract likes and shares
                             likes, shares = 0, 0
                             stats_p = content_cell.find("p", class_="s")
                             if stats_p:
@@ -253,8 +308,9 @@ def scrape_user_posts(username, pages=10, delay=1):
                                 if shares_match:
                                     shares = int(shares_match.group(1))
                             
+                            # Add to posts data
                             posts_data.append({
-                                'post_id': post_id or f"{username}_{len(posts_data)}",
+                                'post_id': post_id,
                                 'username': username,
                                 'post_text': post_text,
                                 'post_date': post_date,
@@ -267,15 +323,27 @@ def scrape_user_posts(username, pages=10, delay=1):
                                 'shares': shares
                             })
                             
+                            # Move to next post (skip content row)
+                            i += 2
+                            
                         except Exception as e:
                             print(f"Error processing post: {str(e)}")
+                            i += 1
                             continue
                     
                     # Find next page link
-                    next_page = soup.find("a", string="Next")
+                    next_page = None
+                    for a_tag in soup.find_all("a"):
+                        if a_tag.get_text(strip=True) == "Next":
+                            next_page = a_tag
+                            break
+                            
                     if not next_page:
+                        print(f"No next page found for {username}")
                         break
-                    url = "https://www.nairaland.com" + next_page["href"]
+                        
+                    url = "https://www.nairaland.com" + next_page['href']
+                    print(f"Next page URL: {url}")
                     time.sleep(delay)
                     break
                     
@@ -283,13 +351,14 @@ def scrape_user_posts(username, pages=10, delay=1):
                     print(f"Error on attempt {attempt+1}: {str(e)}")
                     time.sleep(2)
                     
-            # Break out of pages loop if no next page found
+            # Break if no next page
             if not next_page:
                 break
-    
+                
     except Exception as e:
         print(f"Error scraping {username}: {str(e)}")
     
+    print(f"Scraped {len(posts_data)} posts for {username}")
     return {
         'username': username,
         'posts': posts_data,
@@ -733,8 +802,7 @@ def plot_coordination_network(G):
             colorbar=dict(
                 thickness=15,
                 title='Node ID',
-                xanchor='left',
-                titleside='right'
+                xanchor='left'
             )
         )
     )
@@ -753,28 +821,35 @@ def plot_coordination_network(G):
     return fig
 
 def plot_timeline(df):
+    # Create a copy to avoid modifying the original dataframe
+    df_sorted = df.copy()
+    
+    # Convert timestamp to datetime for better display
+    df_sorted['datetime'] = pd.to_datetime(df_sorted['timestamp'], unit='s')
+    
     # Sort by timestamp
-    df_sorted = df.sort_values('timestamp')
+    df_sorted = df_sorted.sort_values('datetime')
     
     # Create a figure
     fig = px.scatter(
         df_sorted,
-        x='timestamp',
+        x='datetime',  # Use datetime column instead of timestamp
         y='username',
         color='section',
         hover_data=['post_date', 'post_time', 'topic'],
         title='Timeline of Posts',
-        labels={'timestamp': 'Date & Time', 'username': 'User', 'section': 'Section'},
+        labels={'datetime': 'Date & Time', 'username': 'User', 'section': 'Section'},
         height=600
     )
     
-    # Convert timestamp to readable date
+    # Format the x-axis to show readable date and time
     fig.update_xaxes(
         tickformat='%Y-%m-%d %H:%M',
         tickangle=45
     )
     
     return fig
+
 
 def plot_user_section_distribution(df):
     # Count posts by section and user
