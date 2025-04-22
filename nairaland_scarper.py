@@ -192,7 +192,7 @@ def scrape_user_profile(username):
                 for p_tag in soup.find_all('p'):
                     p_text = p_tag.get_text(strip=True)
                     if "Time registered:" in p_text:
-                        return p_text.replace("Time registered:", "")[1].strip()
+                        return p_text.split("Time registered:")[1].strip() #p_text.replace("Time registered:", "").strip()
             time.sleep(1)
         except Exception as e:
             print(f"Error fetching profile: {str(e)}")
@@ -247,16 +247,26 @@ def scrape_user_posts(username, pages=10, delay=1):
                                 time_str, date_str = datetime_text, "Today"
                             
                             # Extract section and topic
-                            links = header_cell.find_all("a")
+                            if not header_cell:
+                                i += 1
+                                continue
+                            #links = header_cell.find_all("a")
                             section = ""
                             topic = ""
                             topic_url = ""
-                            
-                            if len(links) >= 1:
-                                section = links[0].get_text(strip=True)
-                            if len(links) >= 2:
-                                topic = links[1].get_text(strip=True)
-                                topic_url = links[1].get('href', '')
+                            links = header_cell.find_all("a")
+                            for link in links:
+                                href = link.get('href', '')
+                                if href.startswith('/') and not href.startswith('/7') and not link.has_attr('name'):
+                                    section = link.get_text(strip=True)
+                                elif '#' in href and not link.has_attr('name') and not href.startswith('/icons'):
+                                    topic = link.get_text(strip=True)
+                                    topic_url = link.get('href', '')
+                            #if len(links) >= 1:
+                                #section = links[0].get_text(strip=True)
+                            #if len(links) >= 2:
+                                #topic = links[1].get_text(strip=True)
+                                #topic_url = links[1].get('href', '')
                             
                             # Get post ID
                             post_id = None
