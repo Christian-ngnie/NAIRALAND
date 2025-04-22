@@ -111,13 +111,11 @@ def parse_date_time(date_str, time_str):
     try:
         now = datetime.datetime.now()
         
-        # Handle "Today" and other relative dates
         if "Today" in date_str:
             date = now.date()
         elif "Yesterday" in date_str:
             date = (now - datetime.timedelta(days=1)).date()
         else:
-            # Parse date format "Apr 18" or "Apr 18, 2023"
             date_parts = re.findall(r'(\w+)\s+(\d+)(?:,\s+(\d+))?', date_str)
             if date_parts:
                 month, day, year = date_parts[0]
@@ -126,10 +124,8 @@ def parse_date_time(date_str, time_str):
                              "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}.get(month, 1)
                 date = datetime.date(year, month_num, int(day))
             else:
-                # Default to today if parsing fails
                 date = now.date()
         
-        # Parse time format "12:34pm"
         time_match = re.search(r'(\d+):(\d+)([ap]m)', time_str)
         if time_match:
             hour, minute, ampm = time_match.groups()
@@ -140,110 +136,94 @@ def parse_date_time(date_str, time_str):
                 hour = 0
             time = datetime.time(hour, int(minute))
         else:
-            # Default to midnight if parsing fails
             time = datetime.time(0, 0)
         
-        # Combine date and time
         datetime_obj = datetime.datetime.combine(date, time)
         timestamp = int(datetime_obj.timestamp())
         
         return date.strftime('%Y-%m-%d'), time.strftime('%H:%M'), timestamp
     except Exception as e:
-        # Return default values if parsing fails
         return "2023-01-01", "00:00", int(now.timestamp())
 
 def scrape_user_profile(username):
-    """Scrape registration date from profile page (/username)"""
-    profile_url = f"https://www.nairaland.com/username"
-    response = requests.get(profile_url, headers=get_headers(), timeout=10)
-    
-    if response.status_code != 200:
-        return None
-    
-    soup = BeautifulSoup(response.text, 'html.parser')
-    
-    # Extract registration date
-    registration_date = None
-    for p_tag in soup.find_all('p'):
-        if "Time registered:" in p_tag.text:
-            registration_date = p_tag.text.replace("Time registered:", "").strip()
-            break
-            
-    return registration_date
+    """Scrape registration date from profile page"""
+    profile_url = f"https://www.nairaland.com/{username}"
+    for attempt in range(3):
+        try:
+            response = requests.get(profile_url, headers=get_headers(), timeout=10)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                for p_tag in soup.find_all('p'):
+                    if "Time registered:" in p_tag.text:
+                        return p_tag.text.replace("Time registered:", "").strip()
+            time.sleep(1)
+        except Exception as e:
+            continue
+    return None
 
 def scrape_user_posts(username, pages=10, delay=1):
     posts_data = []
-    registration_date = scrape_user_profile(username)  # Get reg date from profile page
+    registration_date = scrape_user_profile(username)
     
     try:
-        for page in range(1, pages):
-            url = f"https://www.nairaland.com/username/posts/page-1"
-            if page == 1:
-                url = f"https://www.nairaland.com/username/posts"
-                
-            response = requests.get(url, headers=get_headers(), timeout=10)
-            
-            if response.status_code != 200:
-                if page > 0: break
-                else: raise Exception(f"Failed to fetch page for {username}")
-                    
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Find all post blocks (each post has 2 <tr> elements: metadata and content)
-            all_trs = soup.find_all('tr')
-            
-            for i, tr in enumerate(all_trs):
-                # Metadata row (section, topic, datetime)
-                if 'bold l pu' in tr.get('class', []):
-                    meta_tr = tr
-                    content_tr = all_trs[i + 1] if i + 1 < len(all_trs) else None
-                    
-                    if not content_tr or not content_tr.find('td', id=lambda x: x and x.startswith('pb')):
+        url = f"https://www.nairaland.com/{username}/posts"
+        for _ in range(pages):
+            for attempt in range(3):
+                try:
+                    response = requests.get(url, headers=get_headers(), timeout=10)
+                    if response.status_code != 200:
                         continue
+                        
+                    soup = BeautifulSoup(response.content, "html.parser")
+                    posts = soup.find_all("div", class_="post")
                     
-                    try:
-                        # Extract metadata from meta_tr
-                        section = meta_tr.find('a', href=lambda x: x and x.startswith('/')).text.strip()
-                        topic_elem = meta_tr.find('a', href=lambda x: x and '#' in x)
-                        topic = topic_elem.text.strip() if topic_elem else "Unknown"
-                        
-                        # Extract datetime
-                        datetime_span = meta_tr.find('span', class_='s')
-                        datetime_text = ' '.join([b.text.strip() for b in datetime_span.find_all('b')])
-                        time_str, date_str = datetime_text.split(' On ') if ' On ' in datetime_text else (datetime_text, "Today")
-                        
-                        # Extract post content
-                        post_td = content_tr.find('td', id=lambda x: x and x.startswith('pb'))
-                        post_text = post_td.get_text(separator=' ', strip=True)
-                        
-                        # Parse date/time and other fields
-                        post_date, post_time, timestamp = parse_date_time(date_str, time_str)
-                        
-                        # Extract likes/shares
-                        likes = int(post_td.find('b', id=lambda x: x and x.startswith('lpt')).text.split()[0]) if post_td.find('b', id=lambda x: x and x.startswith('lpt')) else 0
-                        shares = int(post_td.find('b', id=lambda x: x and x.startswith('shb')).text.split()[0]) if post_td.find('b', id=lambda x: x and x.startswith('shb')) else 0
-                        
-                        posts_data.append({
-                            'post_id': post_td.get('id', '').replace('pb', ''),
-                            'username': username,
-                            'post_text': clean_text(post_text),
-                            'post_date': post_date,
-                            'post_time': post_time,
-                            'timestamp': timestamp,
-                            'section': section,
-                            'topic': topic,
-                            'likes': likes,
-                            'shares': shares
-                        })
-                        
-                    except Exception as e:
-                        st.error(f"Error processing post: {str(e)}")
-                        continue
-            # Pagination logic
-            if not soup.find('a', href=f"/username/posts/page"):
-                break
-                
-            time.sleep(delay)
+                    for post in posts:
+                        try:
+                            # Extract metadata
+                            meta = post.find("div", class_="bold")
+                            time_tag = meta.find("span", class_="s")
+                            datetime_text = time_tag.get_text(strip=True)
+                            time_str, date_str = datetime_text.split(' On ') if ' On ' in datetime_text else (datetime_text, "Today")
+                            
+                            # Extract content
+                            content_div = post.find("div", class_="narrow")
+                            post_text = clean_content(content_div.get_text(separator=" ", strip=True))
+                            
+                            # Parse date/time
+                            post_date, post_time, timestamp = parse_date_time(date_str, time_str)
+                            
+                            # Extract section/topic
+                            links = meta.find_all("a")
+                            section = links[0].text if len(links) > 0 else "Unknown"
+                            topic = links[1].text if len(links) > 1 else "Unknown"
+                            
+                            posts_data.append({
+                                'post_id': post.get('id', ''),
+                                'username': username,
+                                'post_text': post_text,
+                                'post_date': post_date,
+                                'post_time': post_time,
+                                'timestamp': timestamp,
+                                'section': section,
+                                'topic': topic,
+                                'likes': 0,
+                                'shares': 0
+                            })
+                            
+                        except Exception as e:
+                            continue
+                    
+                    # Pagination
+                    next_page = soup.find("a", string="Next")
+                    if not next_page:
+                        break
+                    url = "https://www.nairaland.com" + next_page["href"]
+                    time.sleep(delay)
+                    break
+                    
+                except Exception as e:
+                    time.sleep(2)
+                    continue
     
     except Exception as e:
         st.error(f"Error scraping {username}: {str(e)}")
