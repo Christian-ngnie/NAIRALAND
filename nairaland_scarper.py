@@ -257,14 +257,31 @@ def scrape_user_posts(username, pages=10, delay=1):
                             links = header_cell.find_all("a")
                             for link in links:
                                 href = link.get('href', '')
-                                if href.startswith('/') and not href.startswith('/7') and not link.has_attr('name'):
+                                if link.has_attr('name') or href.startswith('/icons'):
+                                    continue
+                                if href.startswith('/') and '#' not in href and not href.endswith('.gif'):
+                                    if any(section_id in href for section_id in ['family', 'politics', 'romance', 'sports', 'business', 'health', 'travel', 'foreign-affairs', 'culture', 'education']):
+                                        section = link.get_text(strip=True)
+                                        continue
+                                if '#' in href and not section:
                                     section = link.get_text(strip=True)
-                                elif '#' in href and not link.has_attr('name') and not href.startswith('/icons'):
+                                elif '#' in href:
                                     topic = link.get_text(strip=True)
-                                    topic_url = link.get('href', '')
+                                    topic_url = href
+                                    break
+                                #if href.startswith('/') and not href.startswith('/7') and not link.has_attr('name'):
+                                    #section = link.get_text(strip=True)
+                                #elif '#' in href and not link.has_attr('name') and not href.startswith('/icons'):
+                                    #topic = link.get_text(strip=True)
+                                    #topic_url = link.get('href', '')
                             #if len(links) >= 1:
                                 #section = links[0].get_text(strip=True)
-                            #if len(links) >= 2:
+                            if not section and len(links) >= 2:
+                                non_user_links = [link for link in links if not link.has_attr('class') or 'user' not in link['class']]
+                                if len(non_user_links) >= 2:
+                                    section = non_user_links[0].get_text(strip=True)
+                                    topic = non_user_links[1].get_text(strip=True)
+                                    topic_url = non_user_links[1].get('href', '')
                                 #topic = links[1].get_text(strip=True)
                                 #topic_url = links[1].get('href', '')
                             
