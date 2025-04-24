@@ -383,7 +383,7 @@ def save_to_database(data, conn):
     for user_data in data:
         username = user_data['username']
         registration_date = user_data['registration_date']
-        profile_url = f"https://www.nairaland.com/username"
+        profile_url = f"https://www.nairaland.com/{username}"
         
         # Insert or update user
         cursor.execute('''
