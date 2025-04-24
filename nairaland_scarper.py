@@ -199,32 +199,32 @@ def scrape_user_profile(username):
             continue
     return None
 
-def scrape_user_posts(username, pages=10, delay=1):
+def scrape_user_posts(username, pages=50, delay=1):
     posts_data = []
     registration_date = scrape_user_profile(username)
     
     try:
-        url = f"https://www.nairaland.com/{username}/posts"
+        base_url = f"https://www.nairaland.com/{username}/posts"
+        
         for page_num in range(pages):
+            current_url = f"{base_url}/{page_num-1}" if page_num > 0 else base_url
+            print(f"Scraping page {page_num+1} for {username}: {current_url}")
+            
             for attempt in range(3):
                 try:
-                    print(f"Scraping page {page_num+1} for {username}, URL: {url}")
-                    response = requests.get(url, headers=get_headers(), timeout=10)
-                    
+                    response = requests.get(current_url, headers=get_headers(), timeout=10)
                     if response.status_code != 200:
                         print(f"Error: Status code {response.status_code}")
                         time.sleep(delay)
                         continue
                     
                     soup = BeautifulSoup(response.content, "html.parser")
-                    
-                    # Find all post row pairs (header + content)
                     rows = soup.find_all("tr")
+                    posts_on_page = 0
                     i = 0
                     
                     while i < len(rows) - 1:
                         try:
-                            # Check if this is a header row
                             header_row = rows[i]
                             header_cell = header_row.find("td", class_="bold")
                             
@@ -232,7 +232,6 @@ def scrape_user_posts(username, pages=10, delay=1):
                                 i += 1
                                 continue
                             
-                            # Extract post metadata
                             time_span = header_cell.find("span", class_="s")
                             if not time_span:
                                 i += 1
@@ -240,17 +239,11 @@ def scrape_user_posts(username, pages=10, delay=1):
                                 
                             datetime_text = time_span.get_text(strip=True)
                             
-                            # Parse date and time
                             if " On " in datetime_text:
                                 time_str, date_str = datetime_text.split(' On ', 1)
                             else:
                                 time_str, date_str = datetime_text, "Today"
                             
-                            # Extract section and topic
-                            if not header_cell:
-                                i += 1
-                                continue
-                            #links = header_cell.find_all("a")
                             section = ""
                             topic = ""
                             topic_url = ""
@@ -260,45 +253,21 @@ def scrape_user_posts(username, pages=10, delay=1):
                                 if link.has_attr('name') or href.startswith('/icons'):
                                     continue
                                 if href.startswith('/') and '#' not in href and not href.endswith('.gif'):
-                                    if any(section_id in href for section_id in ['family', 'politics', 'romance', 'sports', 'business', 'health', 'travel', 'foreign-affairs', 'culture', 'education']):
-                                        section = link.get_text(strip=True)
-                                        continue
-                                if '#' in href and not section:
                                     section = link.get_text(strip=True)
                                 elif '#' in href:
                                     topic = link.get_text(strip=True)
                                     topic_url = href
                                     break
-                                #if href.startswith('/') and not href.startswith('/7') and not link.has_attr('name'):
-                                    #section = link.get_text(strip=True)
-                                #elif '#' in href and not link.has_attr('name') and not href.startswith('/icons'):
-                                    #topic = link.get_text(strip=True)
-                                    #topic_url = link.get('href', '')
-                            #if len(links) >= 1:
-                                #section = links[0].get_text(strip=True)
-                            if not section and len(links) >= 2:
-                                non_user_links = [link for link in links if not link.has_attr('class') or 'user' not in link['class']]
-                                if len(non_user_links) >= 2:
-                                    section = non_user_links[0].get_text(strip=True)
-                                    topic = non_user_links[1].get_text(strip=True)
-                                    topic_url = non_user_links[1].get('href', '')
-                                #topic = links[1].get_text(strip=True)
-                                #topic_url = links[1].get('href', '')
                             
-                            # Get post ID
                             post_id = None
                             for anchor in header_cell.find_all("a"):
-                                if anchor.has_attr('name') and (
-                                    anchor['name'].startswith('msg') or 
-                                    anchor['name'].isdigit()
-                                ):
+                                if anchor.has_attr('name') and (anchor['name'].startswith('msg') or anchor['name'].isdigit()):
                                     post_id = anchor['name']
                                     break
                             
                             if not post_id:
                                 post_id = f"{username}_{len(posts_data)}"
                             
-                            # Extract content from next row
                             content_row = rows[i+1] if i+1 < len(rows) else None
                             if not content_row:
                                 i += 1
@@ -312,17 +281,14 @@ def scrape_user_posts(username, pages=10, delay=1):
                                 i += 1
                                 continue
                             
-                            # Extract post text
                             content_div = content_cell.find("div", class_="narrow")
                             if content_div:
                                 post_text = clean_text(content_div.get_text(separator=" ", strip=True))
                             else:
                                 post_text = clean_text(content_cell.get_text(strip=True))
                             
-                            # Parse date/time properly
                             post_date, post_time, timestamp = parse_date_time(date_str, time_str)
                             
-                            # Extract likes and shares
                             likes, shares = 0, 0
                             stats_p = content_cell.find("p", class_="s")
                             if stats_p:
@@ -335,7 +301,6 @@ def scrape_user_posts(username, pages=10, delay=1):
                                 if shares_match:
                                     shares = int(shares_match.group(1))
                             
-                            # Add to posts data
                             posts_data.append({
                                 'post_id': post_id,
                                 'username': username,
@@ -350,7 +315,7 @@ def scrape_user_posts(username, pages=10, delay=1):
                                 'shares': shares
                             })
                             
-                            # Move to next post (skip content row)
+                            posts_on_page += 1
                             i += 2
                             
                         except Exception as e:
@@ -358,29 +323,21 @@ def scrape_user_posts(username, pages=10, delay=1):
                             i += 1
                             continue
                     
-                    # Find next page link
-                    next_page = None
-                    for a_tag in soup.find_all("a"):
-                        if a_tag.get_text(strip=True) == "Next":
-                            next_page = a_tag
-                            break
-                            
-                    if not next_page:
-                        print(f"No next page found for {username}")
-                        break
-                        
-                    url = "https://www.nairaland.com" + next_page['href']
-                    print(f"Next page URL: {url}")
+                    if posts_on_page == 0:
+                        print(f"No posts found on page {page_num+1}. Stopping.")
+                        return {
+                            'username': username,
+                            'posts': posts_data,
+                            'registration_date': registration_date,
+                            'post_count': len(posts_data)
+                        }
+                    
                     time.sleep(delay)
                     break
                     
                 except Exception as e:
                     print(f"Error on attempt {attempt+1}: {str(e)}")
                     time.sleep(2)
-                    
-            # Break if no next page
-            if not next_page:
-                break
                 
     except Exception as e:
         print(f"Error scraping {username}: {str(e)}")
