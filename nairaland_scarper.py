@@ -210,19 +210,21 @@ def scrape_user_topics(username):
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, "html.parser")
 
-            # Find the table containing topics
-            topic_table = soup.find('table', id='topics')
-            if not topic_table:
-                return topics
+            # Find all topic rows (they have td with class 'w')
+            topic_rows = soup.find_all('td', class_='w')
 
-            # Find all topic rows
-            for row in topic_table.find_all('tr'):
+            for td in topic_rows:
                 try:
-                    # Find topic link
-                    topic_link = row.find('a')
-                    if not topic_link:
+                    # Find the main topic link (it's usually the second link after the section)
+                    links = td.find_all('a')
+                    if len(links) < 3:  # Need at least section + topic + username
                         continue
 
+                    # Get section
+                    section = links[0].get_text(strip=True)
+
+                    # Get topic details
+                    topic_link = links[1]
                     title = topic_link.get_text(strip=True)
                     href = topic_link.get('href', '')
 
@@ -230,16 +232,17 @@ def scrape_user_topics(username):
                     if title.startswith("Re: "):
                         continue
 
-                    # Validate topic URL
-                    if href and '/' in href:
-                        full_url = f"https://www.nairaland.com{href}" if href.startswith('/') else href
-                        topic_id = href.split('/')[-1]
+                    # Get topic ID from href
+                    topic_id = href.split('/')[1] if '/' in href else None
 
+                    if topic_id and topic_id.isdigit():
                         topics.append({
                             'title': title,
-                            'url': full_url,
-                            'topic_id': topic_id
+                            'url': f"https://www.nairaland.com{href}",
+                            'topic_id': topic_id,
+                            'section': section
                         })
+
                 except Exception as e:
                     print(f"Error processing topic row: {str(e)}")
                     continue
@@ -261,55 +264,56 @@ def scrape_topic_posts(topic_url, username):
 
         soup = BeautifulSoup(response.content, "html.parser")
 
-        # Find the main post (first post)
-        main_post = None
-        post_tables = soup.find_all('table', class_='narrow')
+        # Find all post rows (they have td with class 'l w pd')
+        post_rows = soup.find_all('td', class_=['l', 'w', 'pd'])
 
-        for table in post_tables:
+        for row in post_rows:
             try:
-                # Check if this is a post by the target user
-                user_cell = table.find('a', class_='user')
-                if not user_cell or user_cell.get_text(strip=True).lower() != username.lower():
+                # Find the post content div
+                content_div = row.find('div', class_='narrow')
+                if not content_div:
                     continue
 
-                # Get post metadata
-                post_id = None
-                post_time = None
-                post_date = None
+                # Get post ID from the td's id attribute
+                post_id = row.get('id', '').replace('pb', '')
 
-                # Find post ID and timestamp
-                for td in table.find_all('td'):
-                    if td.find('a', class_='user'):
-                        # Look for post ID in anchors
-                        for anchor in td.find_all('a'):
-                            if anchor.get('name') and anchor['name'].isdigit():
-                                post_id = anchor['name']
-                                break
+                # Get post text
+                post_text = clean_text(content_div.get_text(separator=" ", strip=True))
 
-                        # Get timestamp
-                        time_span = td.find('span', class_='s')
-                        if time_span:
-                            time_text = time_span.get_text(strip=True)
-                            if " On " in time_text:
-                                time_str, date_str = time_text.split(' On ', 1)
-                            else:
-                                time_str = time_text
-                                date_str = "Today"
-
-                # Get post content
-                content_cell = table.find('div', class_='narrow')
-                if not content_cell:
+                # Find associated header row (it's in the previous tr)
+                header_row = row.parent.find_previous_sibling('tr')
+                if not header_row:
                     continue
 
-                post_text = clean_text(content_cell.get_text(separator=" ", strip=True))
+                header_td = header_row.find('td', class_='w')
+                if not header_td:
+                    continue
 
-                # Parse date/time
-                post_date, post_time, timestamp = parse_date_time(date_str, time_str)
+                # Check if this post is by the target user
+                user_link = header_td.find('a', href=f"/{username.lower()}")
+                if not user_link:
+                    continue
+
+                # Get timestamp
+                time_span = header_td.find('span', class_='s')
+                if time_span:
+                    time_text = time_span.get_text(strip=True)
+                    # Extract time and date
+                    time_match = re.search(r'(\d+:\d+[ap]m)', time_text)
+                    date_match = re.search(r'On ([A-Za-z]+ \d+(?:, \d{4})?)', time_text)
+
+                    time_str = time_match.group(1) if time_match else ""
+                    date_str = date_match.group(1) if date_match else "Today"
+
+                    # Parse date/time
+                    post_date, post_time, timestamp = parse_date_time(date_str, time_str)
+                else:
+                    post_date, post_time, timestamp = "", "", 0
 
                 # Get likes and shares
                 likes = 0
                 shares = 0
-                stats_p = table.find('p', class_='s')
+                stats_p = row.find('p', class_='s')
                 if stats_p:
                     stats_text = stats_p.get_text(strip=True)
                     likes_match = re.search(r'(\d+) Like', stats_text)
@@ -320,6 +324,13 @@ def scrape_topic_posts(topic_url, username):
                     if shares_match:
                         shares = int(shares_match.group(1))
 
+                # Get images if any
+                images = []
+                for img in row.find_all('img', class_='attachmentimage'):
+                    img_src = img.get('src', '')
+                    if img_src:
+                        images.append(img_src)
+
                 # Add to posts list
                 posts.append({
                     'post_id': post_id,
@@ -329,7 +340,8 @@ def scrape_topic_posts(topic_url, username):
                     'post_time': post_time,
                     'timestamp': timestamp,
                     'likes': likes,
-                    'shares': shares
+                    'shares': shares,
+                    'images': images
                 })
 
             except Exception as e:
@@ -362,13 +374,7 @@ def scrape_user_posts(username, pages=10, delay=1):
             for post in topic_posts:
                 post['username'] = username
                 post['topic'] = topic['title']
-
-                # Try to extract section from URL
-                url_parts = topic['url'].split('/')
-                if len(url_parts) > 4:
-                    post['section'] = url_parts[3]
-                else:
-                    post['section'] = ''
+                post['section'] = topic['section']
 
             all_posts.extend(topic_posts)
             time.sleep(delay)
